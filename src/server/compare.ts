@@ -12,6 +12,21 @@ function normalizeIssueUrl(raw?: string): string {
   }
 }
 
+function issueUrls(issue: SeoIssue): string[] {
+  const urls = new Set<string>();
+  if (issue.url) urls.add(issue.url);
+  for (const match of issue.evidence?.match(/^https?:\/\/\S+$/gm) || []) urls.add(match.trim());
+  return urls.size > 0 ? [...urls] : ["site-wide"];
+}
+
+function expandIssueOccurrences(issues: SeoIssue[]): SeoIssue[] {
+  return issues.flatMap((issue) => issueUrls(issue).map((url) => ({
+    ...issue,
+    id: `${issue.id}:${normalizeIssueUrl(url)}`,
+    url: url === "site-wide" ? undefined : url,
+  })));
+}
+
 export function issueFingerprint(issue: SeoIssue): string {
   return `${issue.code}|${normalizeIssueUrl(issue.url)}`;
 }
@@ -32,8 +47,8 @@ function changedFields(current: PageAudit, previous: PageAudit): PageChange["fie
 }
 
 export function compareAudits(current: AuditResult, previous: AuditResult): AuditComparison {
-  const currentIssues = new Map(current.issues.map((issue) => [issueFingerprint(issue), issue]));
-  const previousIssues = new Map(previous.issues.map((issue) => [issueFingerprint(issue), issue]));
+  const currentIssues = new Map(expandIssueOccurrences(current.issues).map((issue) => [issueFingerprint(issue), issue]));
+  const previousIssues = new Map(expandIssueOccurrences(previous.issues).map((issue) => [issueFingerprint(issue), issue]));
 
   const newIssues = [...currentIssues.entries()]
     .filter(([fingerprint]) => !previousIssues.has(fingerprint))
