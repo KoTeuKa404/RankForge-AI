@@ -28,8 +28,8 @@ function page(url: string, overrides: Partial<PageAudit> = {}): PageAudit {
   };
 }
 
-function issue(code: string, url: string): SeoIssue {
-  return { id: crypto.randomUUID(), code, url, severity: "high", title: code, description: code, recommendation: code };
+function issue(code: string, url: string, evidence?: string): SeoIssue {
+  return { id: crypto.randomUUID(), code, url, evidence, severity: "high", title: code, description: code, recommendation: code };
 }
 
 function audit(id: string, score: number, issues: SeoIssue[], pages: PageAudit[]): AuditResult {
@@ -63,5 +63,17 @@ describe("audit comparison", () => {
     expect(result.fixedIssues).toHaveLength(1);
     expect(result.newPages).toContain("https://example.com/b");
     expect(result.changedPages[0].fields).toContain("title");
+  });
+
+  it("compares affected URLs inside grouped issue evidence", () => {
+    const beforeIssue = issue("h1-missing", "https://example.com/a", "Affected URLs:\nhttps://example.com/a\nhttps://example.com/b");
+    const afterIssue = issue("h1-missing", "https://example.com/a", "Affected URLs:\nhttps://example.com/a\nhttps://example.com/c");
+    const result = compareAudits(
+      audit("after", 80, [afterIssue], [page("https://example.com/a"), page("https://example.com/c")]),
+      audit("before", 80, [beforeIssue], [page("https://example.com/a"), page("https://example.com/b")]),
+    );
+    expect(result.newIssues.map((item) => item.url)).toContain("https://example.com/c");
+    expect(result.fixedIssues.map((item) => item.url)).toContain("https://example.com/b");
+    expect(result.persistentIssueCount).toBe(1);
   });
 });
