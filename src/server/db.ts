@@ -16,6 +16,10 @@ interface AuditRow {
   issue_count: number;
   created_at: string;
   result_json?: string;
+  previous_audit_id?: string | null;
+  score_delta?: number | null;
+  new_issue_count?: number | null;
+  fixed_issue_count?: number | null;
 }
 
 function projectFromRow(row: ProjectRow): Project {
@@ -31,7 +35,20 @@ function summaryFromRow(row: AuditRow): AuditSummary {
     pagesScanned: row.pages_scanned,
     issueCount: row.issue_count,
     createdAt: row.created_at,
+    previousAuditId: row.previous_audit_id || null,
+    scoreDelta: row.score_delta ?? null,
+    newIssueCount: row.new_issue_count || 0,
+    fixedIssueCount: row.fixed_issue_count || 0,
   };
+}
+
+function parseAuditJson(raw?: string): AuditResult | null {
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as AuditResult;
+  } catch {
+    return null;
+  }
 }
 
 export async function listProjects(db: D1Database, ownerEmail: string): Promise<Project[]> {
@@ -60,8 +77,9 @@ export async function userOwnsProject(db: D1Database, ownerEmail: string, projec
 export async function saveAudit(db: D1Database, ownerEmail: string, projectId: string | null, result: AuditResult): Promise<void> {
   await db.prepare(
     `INSERT INTO audits
-      (id, project_id, owner_email, root_url, score, pages_scanned, issue_count, result_json, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      (id, project_id, owner_email, root_url, score, pages_scanned, issue_count, result_json, created_at,
+       previous_audit_id, score_delta, new_issue_count, fixed_issue_count)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).bind(
     result.id,
     projectId,
@@ -72,13 +90,19 @@ export async function saveAudit(db: D1Database, ownerEmail: string, projectId: s
     result.issues.length,
     JSON.stringify(result),
     result.finishedAt,
+    result.comparison?.previousAuditId || null,
+    result.comparison?.scoreDelta ?? null,
+    result.comparison?.newIssues.length || 0,
+    result.comparison?.fixedIssues.length || 0,
   ).run();
 }
 
 export async function listAudits(db: D1Database, ownerEmail: string, projectId?: string): Promise<AuditSummary[]> {
+  const columns = `id, project_id, root_url, score, pages_scanned, issue_count, created_at,
+    previous_audit_id, score_delta, new_issue_count, fixed_issue_count`;
   const query = projectId
-    ? "SELECT id, project_id, root_url, score, pages_scanned, issue_count, created_at FROM audits WHERE owner_email = ? AND project_id = ? ORDER BY created_at DESC LIMIT 50"
-    : "SELECT id, project_id, root_url, score, pages_scanned, issue_count, created_at FROM audits WHERE owner_email = ? ORDER BY created_at DESC LIMIT 50";
+    ? `SELECT ${columns} FROM audits WHERE owner_email = ? AND project_id = ? ORDER BY created_at DESC LIMIT 50`
+    : `SELECT ${columns} FROM audits WHERE owner_email = ? ORDER BY created_at DESC LIMIT 50`;
   const statement = db.prepare(query);
   const result = projectId
     ? await statement.bind(ownerEmail, projectId).all<AuditRow>()
@@ -90,12 +114,23 @@ export async function getAudit(db: D1Database, ownerEmail: string, auditId: stri
   const row = await db.prepare("SELECT result_json FROM audits WHERE id = ? AND owner_email = ? LIMIT 1")
     .bind(auditId, ownerEmail)
     .first<{ result_json: string }>();
-  if (!row?.result_json) return null;
-  try {
-    return JSON.parse(row.result_json) as AuditResult;
-  } catch {
-    return null;
-  }
+  return parseAuditJson(row?.result_json);
+}
+
+export async function getLatestComparableAudit(
+  db: D1Database,
+  ownerEmail: string,
+  projectId: string | null,
+  rootUrl: string,
+): Promise<AuditResult | null> {
+  const row = projectId
+    ? await db.prepare(
+      "SELECT result_json FROM audits WHERE owner_email = ? AND project_id = ? ORDER BY created_at DESC LIMIT 1",
+    ).bind(ownerEmail, projectId).first<{ result_json: string }>()
+    : await db.prepare(
+      "SELECT result_json FROM audits WHERE owner_email = ? AND project_id IS NULL AND root_url = ? ORDER BY created_at DESC LIMIT 1",
+    ).bind(ownerEmail, rootUrl).first<{ result_json: string }>();
+  return parseAuditJson(row?.result_json);
 }
 
 export async function consumeRateLimit(db: D1Database | undefined, key: string, limit: number, windowSeconds: number): Promise<boolean> {

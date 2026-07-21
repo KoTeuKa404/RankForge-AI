@@ -1,5 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "./api";
+import { auditIssuesCsv, issueKey } from "./export";
+import KeywordWorkspace from "./KeywordWorkspace";
+import ContentBriefWorkspace, { type BriefSeed } from "./ContentBriefWorkspace";
+import InternalLinkWorkspace from "./InternalLinkWorkspace";
+import MonitoringWorkspace from "./MonitoringWorkspace";
 import type { AiFix, AuditResult, AuditSummary, PageAudit, Project, SeoIssue, Severity, UserIdentity } from "../shared/types";
 
 type Filter = "all" | Severity;
@@ -46,6 +51,8 @@ function App() {
   const [aiLoading, setAiLoading] = useState(false);
   const [newProjectOpen, setNewProjectOpen] = useState(false);
   const [projectName, setProjectName] = useState("");
+  const [workspace, setWorkspace] = useState<"audit" | "keywords" | "links" | "briefs" | "monitoring">("audit");
+  const [briefSeed, setBriefSeed] = useState<BriefSeed | null>(null);
 
   useEffect(() => {
     api.me().then((me) => {
@@ -69,6 +76,8 @@ function App() {
     audit?.issues.forEach((issue) => { counts[issue.severity] += 1; });
     return counts;
   }, [audit]);
+
+  const newIssueKeys = useMemo(() => new Set((audit?.comparison?.newIssues || []).map(issueKey)), [audit]);
 
   const visibleIssues = useMemo(() => (audit?.issues || [])
     .filter((issue) => filter === "all" || issue.severity === filter)
@@ -145,7 +154,7 @@ function App() {
   return <div className="app-shell">
     <header className="topbar">
       <a className="brand" href="#top" aria-label="RankForge home"><span className="brand-mark">R</span><span>RankForge <b>AI</b></span></a>
-      <nav><a href="#audit">Audit</a><a href="#issues">Issues</a><a href="#history">History</a></nav>
+      <nav><a href="#audit" onClick={() => setWorkspace("audit")}>Audit</a><a href="#audit" onClick={() => setWorkspace("keywords")}>Keywords</a><a href="#audit" onClick={() => setWorkspace("links")}>Links</a><a href="#audit" onClick={() => setWorkspace("briefs")}>Briefs</a><a href="#audit" onClick={() => setWorkspace("monitoring")}>Monitoring</a><a href="#history" onClick={() => setWorkspace("audit")}>History</a></nav>
       {identity.authenticated
         ? <div className="identity"><span>{identity.name || identity.email}</span><a href="/signout-with-chatgpt">Sign out</a></div>
         : <a className="button ghost" href="/signin-with-chatgpt">Sign in with ChatGPT</a>}
@@ -162,10 +171,10 @@ function App() {
       <section className="workspace" id="audit">
         <aside className="sidebar">
           <div className="sidebar-title">Workspace</div>
-          <button className="nav-item active"><span>⌁</span> Site audit</button>
-          <button className="nav-item" disabled><span>◎</span> Keywords <em>Soon</em></button>
-          <button className="nav-item" disabled><span>↗</span> Internal links <em>Soon</em></button>
-          <button className="nav-item" disabled><span>✦</span> Content briefs <em>Soon</em></button>
+          <button className={`nav-item ${workspace === "audit" ? "active" : ""}`} onClick={() => setWorkspace("audit")}><span>⌁</span> Site audit</button>
+          <button className={`nav-item ${workspace === "keywords" ? "active" : ""}`} onClick={() => setWorkspace("keywords")}><span>◎</span> Keywords</button>
+          <button className={`nav-item ${workspace === "links" ? "active" : ""}`} onClick={() => setWorkspace("links")}><span>↗</span> Internal links</button>
+          <button className={`nav-item ${workspace === "briefs" ? "active" : ""}`} onClick={() => setWorkspace("briefs")}><span>✦</span> Content briefs</button><button className={`nav-item ${workspace === "monitoring" ? "active" : ""}`} onClick={() => setWorkspace("monitoring")}><span>◉</span> Monitoring</button>
           <div className="sidebar-title space-top">Project</div>
           {identity.authenticated ? <>
             <select value={selectedProject} onChange={(event) => setSelectedProject(event.target.value)} aria-label="Selected project">
@@ -176,7 +185,7 @@ function App() {
           </> : <div className="signin-note">Sign in to save projects and compare audit history.</div>}
         </aside>
 
-        <div className="content-panel">
+        {workspace === "audit" ? <div className="content-panel">
           <div className="panel-heading">
             <div><div className="eyebrow">Crawler</div><h2>Technical site audit</h2></div>
             <div className="live-pill"><span/> Runtime ready</div>
@@ -196,8 +205,13 @@ function App() {
             <section className="result-summary">
               <ScoreRing score={audit.score}/>
               <div className="summary-copy"><div className="eyebrow">Audit complete</div><h3>{audit.rootUrl}</h3><p>{audit.pagesScanned} pages scanned · {audit.issues.length} findings{audit.stoppedReason ? ` · ${audit.stoppedReason}` : ""}</p></div>
-              <div className="summary-actions"><button className="button subtle" onClick={() => download("rankforge-audit.json", JSON.stringify(audit, null, 2), "application/json")}>Export JSON</button><button className="button subtle" onClick={() => download("rankforge-audit.html", htmlReport(audit), "text/html")}>Export report</button></div>
+              <div className="summary-actions"><button className="button subtle" onClick={() => download("rankforge-audit.csv", auditIssuesCsv(audit), "text/csv;charset=utf-8")}>Export CSV</button><button className="button subtle" onClick={() => download("rankforge-audit.json", JSON.stringify(audit, null, 2), "application/json")}>Export JSON</button><button className="button subtle" onClick={() => download("rankforge-audit.html", htmlReport(audit), "text/html")}>Export report</button></div>
             </section>
+
+            {audit.comparison && <section className={`comparison-card ${audit.comparison.trend}`}>
+              <div><div className="eyebrow">Since previous audit</div><h3>{audit.comparison.trend === "improved" ? "SEO health improved" : audit.comparison.trend === "declined" ? "New regressions detected" : "Score is unchanged"}</h3><p>Compared with {new Date(audit.comparison.previousFinishedAt).toLocaleString()}.</p></div>
+              <div className="comparison-stats"><span><b>{audit.comparison.scoreDelta > 0 ? "+" : ""}{audit.comparison.scoreDelta}</b><small>score</small></span><span><b>{audit.comparison.newIssues.length}</b><small>new issues</small></span><span><b>{audit.comparison.fixedIssues.length}</b><small>fixed</small></span><span><b>{audit.comparison.changedPages.length}</b><small>changed pages</small></span></div>
+            </section>}
 
             <section className="metric-grid">
               {(["critical", "high", "medium", "low"] as Severity[]).map((severity) => <button key={severity} className={`metric ${severity}`} onClick={() => setFilter(severity)}><span>{severityLabel[severity]}</span><strong>{issueCounts[severity]}</strong><small>findings</small></button>)}
@@ -210,7 +224,7 @@ function App() {
                 {visibleIssues.length === 0 && <div className="empty-row">No issues in this severity group.</div>}
                 {visibleIssues.map((issue) => <article className="issue" key={issue.id}>
                   <div className={`severity-dot ${issue.severity}`} title={severityLabel[issue.severity]}/>
-                  <div className="issue-copy"><div className="issue-title"><h4>{issue.title}</h4><span className={`badge ${issue.severity}`}>{severityLabel[issue.severity]}</span></div><p>{issue.description}</p>{issue.url && <a href={issue.url} target="_blank" rel="noreferrer">{issue.url}</a>}<div className="recommendation"><b>Recommended:</b> {issue.recommendation}</div>{issue.evidence && <details><summary>Evidence</summary><pre>{issue.evidence}</pre></details>}</div>
+                  <div className="issue-copy"><div className="issue-title"><h4>{issue.title}</h4>{newIssueKeys.has(issueKey(issue)) && <span className="badge new">New</span>}<span className={`badge ${issue.severity}`}>{severityLabel[issue.severity]}</span></div><p>{issue.description}</p>{issue.url && <a href={issue.url} target="_blank" rel="noreferrer">{issue.url}</a>}<div className="recommendation"><b>Recommended:</b> {issue.recommendation}</div>{issue.evidence && <details><summary>Evidence</summary><pre>{issue.evidence}</pre></details>}</div>
                   <button className="button ai" onClick={() => generateFix(issue)}>✦ AI Fix</button>
                 </article>)}
               </div>
@@ -218,16 +232,16 @@ function App() {
 
             <section className="pages-section"><div className="section-bar"><div><div className="eyebrow">Crawl inventory</div><h3>Pages</h3></div></div><div className="table-wrap"><table><thead><tr><th>URL</th><th>Status</th><th>Title</th><th>Words</th><th>H1</th><th>Time</th></tr></thead><tbody>{audit.pages.map((page) => <tr key={page.url}><td><a href={page.url} target="_blank" rel="noreferrer">{page.url}</a></td><td><span className={`status-code ${page.status >= 400 ? "bad" : "good"}`}>{page.status}</span></td><td>{page.title || <em>Missing</em>}</td><td>{page.wordCount}</td><td>{page.h1.length}</td><td>{page.loadTimeMs} ms</td></tr>)}</tbody></table></div></section>
           </>}
-        </div>
+        </div> : workspace === "keywords" ? <KeywordWorkspace authenticated={identity.authenticated} selectedProject={selectedProject} projects={projects} onSelectProject={setSelectedProject} onCreateBrief={(analysisId, cluster) => { setBriefSeed({ analysisId, cluster }); setWorkspace("briefs"); }}/> : workspace === "links" ? <InternalLinkWorkspace authenticated={identity.authenticated} selectedProject={selectedProject} projects={projects} onSelectProject={setSelectedProject}/> : workspace === "briefs" ? <ContentBriefWorkspace authenticated={identity.authenticated} selectedProject={selectedProject} projects={projects} onSelectProject={setSelectedProject} seed={briefSeed} onSeedConsumed={() => setBriefSeed(null)}/> : <MonitoringWorkspace authenticated={identity.authenticated} projects={projects}/>}
       </section>
 
-      <section id="history" className="history-section">
+      {workspace === "audit" && <section id="history" className="history-section">
         <div><div className="eyebrow">Durable records</div><h2>Recent audits</h2><p>Signed-in users can reopen previous results and compare progress.</p></div>
-        <div className="history-list">{!identity.authenticated ? <div className="history-empty">Sign in with ChatGPT to enable saved audit history.</div> : history.length === 0 ? <div className="history-empty">No saved audits yet. Select a project and run your first crawl.</div> : history.slice(0, 8).map((item) => <button key={item.id} onClick={() => openHistory(item)}><span><b>{item.rootUrl}</b><small>{new Date(item.createdAt).toLocaleString()}</small></span><strong>{item.score}<small>/100</small></strong></button>)}</div>
-      </section>
+        <div className="history-list">{!identity.authenticated ? <div className="history-empty">Sign in with ChatGPT to enable saved audit history.</div> : history.length === 0 ? <div className="history-empty">No saved audits yet. Select a project and run your first crawl.</div> : history.slice(0, 8).map((item) => <button key={item.id} onClick={() => openHistory(item)}><span><b>{item.rootUrl}</b><small>{new Date(item.createdAt).toLocaleString()}</small>{item.previousAuditId && <small className="history-delta">{item.scoreDelta && item.scoreDelta > 0 ? "+" : ""}{item.scoreDelta ?? 0} score · {item.newIssueCount} new · {item.fixedIssueCount} fixed</small>}</span><strong>{item.score}<small>/100</small></strong></button>)}</div>
+      </section>}
     </main>
 
-    <footer><span>RankForge AI v0.1</span><span>Built for transparent, standards-compliant SEO operations.</span></footer>
+    <footer><span>RankForge AI v0.6</span><span>Built for transparent, standards-compliant SEO operations.</span></footer>
 
     {selectedIssue && <div className="modal-backdrop" onMouseDown={(event) => { if (event.currentTarget === event.target) setSelectedIssue(null); }}><section className="modal" role="dialog" aria-modal="true" aria-labelledby="ai-fix-title"><button className="modal-close" onClick={() => setSelectedIssue(null)} aria-label="Close">×</button><div className="eyebrow">AI remediation</div><h2 id="ai-fix-title">{selectedIssue.title}</h2>{aiLoading ? <div className="ai-loading"><i className="spinner"/> Generating an implementation-ready fix…</div> : aiFix && <div className="fix-content"><h4>Summary</h4><p>{aiFix.summary}</p><h4>Why it matters</h4><p>{aiFix.whyItMatters}</p><h4>Implementation</h4><p>{aiFix.implementation}</p>{aiFix.code && <><h4>Suggested code</h4><pre>{aiFix.code}</pre></>}<h4>Verify</h4><ol>{aiFix.verification.map((step, index) => <li key={index}>{step}</li>)}</ol></div>}</section></div>}
 

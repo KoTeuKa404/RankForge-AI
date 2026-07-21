@@ -1,8 +1,8 @@
 {
   "name": "rankforge-ai",
-  "version": "0.1.0",
+  "version": "0.6.0",
   "private": true,
-  "description": "AI-driven technical SEO audit",
+  "description": "AI-driven technical SEO audit command center for ChatGPT Sites",
   "type": "module",
   "scripts": {
     "dev": "concurrently -k -n web,api \"npm:dev:web\" \"npm:dev:api\"",
