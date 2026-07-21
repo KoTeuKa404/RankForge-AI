@@ -8,14 +8,36 @@ interface CrawlOptions {
 
 interface RobotsRules {
   disallow: string[];
+  sitemaps: string[];
 }
 
-const severityPenalty: Record<Severity, number> = {
-  critical: 15,
+interface ScoreBucket {
+  count: number;
+  affectedUrls: Set<string>;
+}
+
+const severityBasePenalty: Record<Severity, number> = {
+  critical: 18,
   high: 7,
   medium: 3,
   low: 1,
 };
+
+const severityPenaltyCap: Record<Severity, number> = {
+  critical: 45,
+  high: 35,
+  medium: 18,
+  low: 7,
+};
+
+const issuePenaltyCap: Record<Severity, number> = {
+  critical: 30,
+  high: 14,
+  medium: 7,
+  low: 3,
+};
+
+const MAX_QUERY_VARIANTS_PER_PATH = 5;
 
 function text(element: ReturnType<typeof parse> | null | undefined): string {
   return element?.textContent.replace(/\s+/g, " ").trim() || "";
@@ -46,6 +68,11 @@ function makeIssue(
   };
 }
 
+function visibleBodyText(root: ReturnType<typeof parse>): string {
+  for (const node of root.querySelectorAll("script,style,noscript,template,svg")) node.remove();
+  return root.querySelector("body")?.textContent || "";
+}
+
 export function analyzeHtml(html: string, pageUrl: string, status = 200, loadTimeMs = 0): PageAudit {
   const root = parse(html, {
     lowerCaseTagName: true,
@@ -74,7 +101,8 @@ export function analyzeHtml(html: string, pageUrl: string, status = 200, loadTim
     }
   }
 
-  const bodyText = root.querySelector("body")?.textContent || "";
+  const schemaCount = root.querySelectorAll('script[type="application/ld+json" i]').length;
+  const bodyText = visibleBodyText(root);
   const wordCount = bodyText
     .replace(/\s+/g, " ")
     .trim()
@@ -96,10 +124,10 @@ export function analyzeHtml(html: string, pageUrl: string, status = 200, loadTim
     headingCount: root.querySelectorAll("h1,h2,h3,h4,h5,h6").length,
     wordCount,
     imageCount: images.length,
-    imagesMissingAlt: images.filter((image) => !image.hasAttribute("alt") || !image.getAttribute("alt")?.trim()).length,
+    imagesMissingAlt: images.filter((image) => !image.hasAttribute("alt")).length,
     internalLinks: [...internal],
     externalLinks: [...external],
-    schemaCount: root.querySelectorAll('script[type="application/ld+json" i]').length,
+    schemaCount,
     ogTitle: attr(root, 'meta[property="og:title" i]', "content"),
     ogDescription: attr(root, 'meta[property="og:description" i]', "content"),
     incomingLinks: 0,
@@ -180,6 +208,7 @@ function wildcardToRegex(pattern: string): RegExp {
 
 function parseRobots(body: string): RobotsRules {
   const disallow: string[] = [];
+  const sitemaps: string[] = [];
   let applies = false;
 
   for (const originalLine of body.split(/\r?\n/)) {
@@ -192,8 +221,9 @@ function parseRobots(body: string): RobotsRules {
 
     if (field === "user-agent") applies = value === "*" || value.toLowerCase().includes("rankforgebot");
     else if (field === "disallow" && applies && value) disallow.push(value);
+    else if (field === "sitemap" && value) sitemaps.push(value);
   }
-  return { disallow };
+  return { disallow, sitemaps };
 }
 
 function isAllowedByRobots(url: URL, rules: RobotsRules): boolean {
@@ -208,16 +238,23 @@ async function loadRobots(root: URL): Promise<{ rules: RobotsRules; found: boole
   } catch {
     // Absence or network failure is reported separately but does not block the crawl.
   }
-  return { rules: { disallow: [] }, found: false };
+  return { rules: { disallow: [], sitemaps: [] }, found: false };
 }
 
-async function sitemapExists(root: URL): Promise<boolean> {
-  try {
-    const result = await safeFetchText(new URL("/sitemap.xml", root), { method: "GET" });
-    return result.response.ok && /<(?:urlset|sitemapindex)\b/i.test(result.body);
-  } catch {
-    return false;
+async function sitemapExists(root: URL, declaredSitemaps: string[]): Promise<boolean> {
+  const declared = declaredSitemaps.map((value) => {
+    try { return new URL(value, root).toString(); } catch { return ""; }
+  }).filter(Boolean);
+  const candidates = [new URL("/sitemap.xml", root).toString(), ...declared].filter((value, index, values) => values.indexOf(value) === index).slice(0, 4);
+  for (const candidate of candidates) {
+    try {
+      const result = await safeFetchText(candidate, { method: "GET" });
+      if (result.response.ok && /<(?:urlset|sitemapindex)\b/i.test(result.body)) return true;
+    } catch {
+      // Try the next declared sitemap before reporting the site-wide issue.
+    }
   }
+  return false;
 }
 
 function addSiteWideIssues(pages: PageAudit[], issues: SeoIssue[], rootUrl: string, robotsFound: boolean, sitemapFound: boolean): void {
@@ -228,9 +265,27 @@ function addSiteWideIssues(pages: PageAudit[], issues: SeoIssue[], rootUrl: stri
       if (!value) continue;
       groups.set(value, [...(groups.get(value) || []), page]);
     }
-    for (const group of groups.values()) {
+
+    const affectedUrls = new Set<string>();
+    const evidence: string[] = [];
+    for (const [value, group] of groups) {
       if (group.length < 2) continue;
-      issues.push(makeIssue(code, "high", `Duplicate ${label}`, `${group.length} crawled pages use the same ${label}.`, `Write a unique ${label} for each indexable page or consolidate duplicate URLs.`, group[0].url, group.map((page) => page.url).join("\n")));
+      const urls = group.map((page) => page.url);
+      urls.forEach((url) => affectedUrls.add(url));
+      evidence.push(`Shared ${label}: ${value.slice(0, 240)}\n${urls.join("\n")}`);
+    }
+
+    if (affectedUrls.size > 0) {
+      const urls = [...affectedUrls];
+      issues.push(makeIssue(
+        code,
+        "high",
+        `Duplicate ${label}`,
+        `${urls.length} crawled pages participate in duplicate ${label} groups.`,
+        `Write a unique ${label} for each indexable page or consolidate duplicate URLs.`,
+        urls[0],
+        evidence.join("\n\n"),
+      ));
     }
   };
 
@@ -256,13 +311,88 @@ function addSiteWideIssues(pages: PageAudit[], issues: SeoIssue[], rootUrl: stri
     issues.push(makeIssue("robots-missing", "low", "robots.txt not found", "The standard robots.txt endpoint did not return a successful response.", "Publish a deliberate robots.txt file, even if it allows all public crawling.", rootUrl));
   }
   if (!sitemapFound) {
-    issues.push(makeIssue("sitemap-missing", "medium", "XML sitemap not found", "No valid sitemap.xml was detected at the conventional location.", "Publish an XML sitemap containing canonical, indexable URLs and reference it in robots.txt.", rootUrl));
+    issues.push(makeIssue("sitemap-missing", "medium", "XML sitemap not found", "No valid sitemap was detected at the conventional location or in robots.txt.", "Publish an XML sitemap containing canonical, indexable URLs and reference it in robots.txt.", rootUrl));
   }
 }
 
-export function calculateScore(issues: SeoIssue[]): number {
-  const penalty = issues.reduce((total, issue) => total + severityPenalty[issue.severity], 0);
-  return Math.max(0, Math.min(100, 100 - penalty));
+export function groupIssues(issues: SeoIssue[]): SeoIssue[] {
+  const groups = new Map<string, { first: SeoIssue; urls: Set<string>; evidence: Set<string> }>();
+
+  for (const issue of issues) {
+    const key = `${issue.code}|${issue.severity}|${issue.title}|${issue.recommendation}`;
+    const current = groups.get(key) || { first: issue, urls: new Set<string>(), evidence: new Set<string>() };
+    if (issue.url) current.urls.add(issue.url);
+    if (issue.evidence) current.evidence.add(issue.evidence.trim());
+    groups.set(key, current);
+  }
+
+  return [...groups.values()].map(({ first, urls, evidence }) => {
+    const affectedUrls = [...urls];
+    const evidenceBlocks = [...evidence].filter(Boolean);
+    if (affectedUrls.length > 1) evidenceBlocks.push(`Affected URLs:\n${affectedUrls.join("\n")}`);
+
+    return {
+      ...first,
+      id: crypto.randomUUID(),
+      url: affectedUrls[0] || first.url,
+      description: affectedUrls.length > 1
+        ? `${affectedUrls.length} crawled pages are affected. ${first.description}`
+        : first.description,
+      evidence: evidenceBlocks.length > 0 ? evidenceBlocks.join("\n\n") : undefined,
+    };
+  });
+}
+
+export function calculateScore(issues: SeoIssue[], pagesScanned = 1): number {
+  const pageCount = Math.max(1, pagesScanned);
+  const grouped = new Map<string, ScoreBucket>();
+
+  for (const issue of issues) {
+    const key = `${issue.code}|${issue.severity}`;
+    const bucket = grouped.get(key) || { count: 0, affectedUrls: new Set<string>() };
+    bucket.count += 1;
+    if (issue.url) bucket.affectedUrls.add(issue.url);
+    for (const match of issue.evidence?.match(/^https?:\/\/\S+$/gm) || []) bucket.affectedUrls.add(match.trim());
+    grouped.set(key, bucket);
+  }
+
+  const severityTotals: Record<Severity, number> = { critical: 0, high: 0, medium: 0, low: 0 };
+  for (const [key, bucket] of grouped) {
+    const severity = key.slice(key.lastIndexOf("|") + 1) as Severity;
+    const affected = Math.max(bucket.count, bucket.affectedUrls.size, 1);
+    const prevalence = Math.min(1, affected / pageCount);
+    const breadthMultiplier = 1 + Math.min(1, Math.log2(affected + 1) / 4) + Math.min(0.35, prevalence * 0.35);
+    const penalty = Math.min(issuePenaltyCap[severity], severityBasePenalty[severity] * breadthMultiplier);
+    severityTotals[severity] += penalty;
+  }
+
+  const penalty = (Object.keys(severityTotals) as Severity[])
+    .reduce((total, severity) => total + Math.min(severityTotals[severity], severityPenaltyCap[severity]), 0);
+  return Math.max(0, Math.min(100, Math.round(100 - penalty)));
+}
+
+function createQueryVariantGuard(): (raw: string) => boolean {
+  const variantsByPath = new Map<string, Set<string>>();
+  return (raw: string) => {
+    const url = new URL(raw);
+    if (!url.search) return true;
+    const variants = variantsByPath.get(url.pathname) || new Set<string>();
+    if (variants.has(url.search)) return true;
+    if (variants.size >= MAX_QUERY_VARIANTS_PER_PATH) return false;
+    variants.add(url.search);
+    variantsByPath.set(url.pathname, variants);
+    return true;
+  };
+}
+
+function addNonHtmlStatusIssue(issues: SeoIssue[], url: string, status: number): void {
+  if (status >= 500) {
+    issues.push(makeIssue("http-5xx", "critical", "Server error", "The URL returned a server error.", "Fix the upstream failure and verify that the URL returns a stable response.", url, `HTTP ${status}`));
+  } else if (status === 404) {
+    issues.push(makeIssue("http-404", "high", "Page not found", "An internal URL returns 404.", "Restore the resource, correct internal links, or add a relevant 301 redirect.", url));
+  } else if (status >= 400) {
+    issues.push(makeIssue("http-4xx", "high", "Client error response", "An internal URL returned a client error.", "Correct the internal link or make the target publicly accessible.", url, `HTTP ${status}`));
+  }
 }
 
 export async function auditSite(rawUrl: string, options: CrawlOptions): Promise<AuditResult> {
@@ -271,11 +401,17 @@ export async function auditSite(rawUrl: string, options: CrawlOptions): Promise<
   root.pathname = root.pathname || "/";
   root.hash = "";
   const maxPages = Math.max(1, Math.min(25, Math.floor(options.maxPages || 10)));
-  const { rules, found: robotsTxtFound } = await loadRobots(root);
-  const sitemapFound = await sitemapExists(root);
+  let crawlBase = root;
+  let robotsResult = await loadRobots(crawlBase);
+  let rules = robotsResult.rules;
+  let robotsTxtFound = robotsResult.found;
+  let sitemapFound = await sitemapExists(crawlBase, rules.sitemaps);
   const queue: string[] = [root.toString()];
   const queued = new Set(queue);
   const visited = new Set<string>();
+  const auditedFinalUrls = new Set<string>();
+  const allowQueryVariant = createQueryVariantGuard();
+  allowQueryVariant(root.toString());
   const pages: PageAudit[] = [];
   const issues: SeoIssue[] = [];
   let stoppedReason: string | undefined;
@@ -294,20 +430,39 @@ export async function auditSite(rawUrl: string, options: CrawlOptions): Promise<
     try {
       const fetched = await safeFetchText(url);
       const contentType = fetched.response.headers.get("content-type") || "";
-      if (!/text\/html|application\/xhtml\+xml/i.test(contentType)) continue;
+      let finalUrl = canonicalizeCrawlUrl(fetched.finalUrl.toString(), crawlBase);
+      if (!finalUrl && pages.length === 0 && auditedFinalUrls.size === 0) {
+        crawlBase = normalizeTargetUrl(fetched.finalUrl.toString());
+        robotsResult = await loadRobots(crawlBase);
+        rules = robotsResult.rules;
+        robotsTxtFound = robotsResult.found;
+        sitemapFound = await sitemapExists(crawlBase, rules.sitemaps);
+        finalUrl = canonicalizeCrawlUrl(fetched.finalUrl.toString(), crawlBase);
+        if (finalUrl) allowQueryVariant(finalUrl);
+      }
+      if (!finalUrl) {
+        issues.push(makeIssue("external-redirect", "medium", "Internal URL redirects off-site", "The URL redirects to a different origin, so the crawler did not analyze the destination.", "Review the redirect and keep internal navigation on the intended site when appropriate.", next, fetched.finalUrl.toString()));
+        continue;
+      }
+      if (auditedFinalUrls.has(finalUrl)) continue;
+      auditedFinalUrls.add(finalUrl);
 
-      const finalUrl = canonicalizeCrawlUrl(fetched.finalUrl.toString(), root) || fetched.finalUrl.toString();
+      if (!/text\/html|application\/xhtml\+xml/i.test(contentType)) {
+        addNonHtmlStatusIssue(issues, finalUrl, fetched.response.status);
+        continue;
+      }
+
       const page = analyzeHtml(fetched.body, finalUrl, fetched.response.status, fetched.durationMs);
       page.contentType = contentType;
       pages.push(page);
       issues.push(...evaluatePage(page));
 
       for (const link of page.internalLinks) {
-        const canonical = canonicalizeCrawlUrl(link, root);
-        if (canonical && !queued.has(canonical) && !visited.has(canonical)) {
-          queued.add(canonical);
-          queue.push(canonical);
-        }
+        const canonical = canonicalizeCrawlUrl(link, crawlBase);
+        if (!canonical || queued.has(canonical) || visited.has(canonical)) continue;
+        if (!allowQueryVariant(canonical)) continue;
+        queued.add(canonical);
+        queue.push(canonical);
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown fetch failure";
@@ -323,15 +478,17 @@ export async function auditSite(rawUrl: string, options: CrawlOptions): Promise<
 
   const normalizedRoot = pages[0].url;
   addSiteWideIssues(pages, issues, normalizedRoot, robotsTxtFound, sitemapFound);
+  const score = calculateScore(issues, pages.length);
+  const groupedIssues = groupIssues(issues);
 
   return {
     id: crypto.randomUUID(),
     rootUrl: normalizedRoot,
     startedAt: startedAt.toISOString(),
     finishedAt: new Date().toISOString(),
-    score: calculateScore(issues),
+    score,
     pagesScanned: pages.length,
-    issues,
+    issues: groupedIssues,
     pages,
     robotsTxtFound,
     sitemapFound,
