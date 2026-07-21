@@ -1,0 +1,14 @@
+# Copy this file to .dev.vars for local development only.
+# Never commit .dev.vars.
+
+# Optional: AI Fix remains disabled when blank.
+OPENAI_API_KEY=
+OPENAI_MODEL=gpt-5.6-luna
+
+# Use at least 32 random characters before testing the protected scheduler endpoint.
+MONITOR_TOKEN=replace_with_at_least_32_random_characters
+
+# Local-only identity. The server accepts this only for localhost/127.0.0.1
+# while ENVIRONMENT=development.
+DEV_USER_EMAIL=developer@localhost
+ENVIRONMENT=development

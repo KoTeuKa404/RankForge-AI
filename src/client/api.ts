@@ -1,4 +1,23 @@
-import type { AiFix, AuditResult, AuditSummary, PageAudit, Project, SeoIssue, UserIdentity } from "../shared/types";
+import type {
+  AiFix,
+  AuditResult,
+  AuditSummary,
+  ContentBrief,
+  ContentBriefSummary,
+  KeywordAnalysis,
+  KeywordAnalysisSummary,
+  KeywordCluster,
+  InternalLinkAnalysis,
+  InternalLinkAnalysisSummary,
+  MonitorCadence,
+  MonitorRunResult,
+  MonitoringAlert,
+  MonitoringConfig,
+  PageAudit,
+  Project,
+  SeoIssue,
+  UserIdentity,
+} from "../shared/types";
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const response = await fetch(path, {
@@ -30,4 +49,38 @@ export const api = {
     method: "POST",
     body: JSON.stringify({ issue, page }),
   }),
+  keywordAnalyses: (projectId?: string) => request<{ analyses: KeywordAnalysisSummary[] }>(`/api/keyword-analyses${projectId ? `?projectId=${encodeURIComponent(projectId)}` : ""}`),
+  analyzeKeywords: (input: string, projectId?: string, name?: string) => request<{ analysis: KeywordAnalysis }>("/api/keyword-analyses", {
+    method: "POST",
+    body: JSON.stringify({ input, projectId: projectId || undefined, name }),
+  }),
+  keywordAnalysisById: (id: string) => request<{ analysis: KeywordAnalysis }>(`/api/keyword-analyses/${encodeURIComponent(id)}`),
+  contentBriefs: (projectId?: string) => request<{ briefs: ContentBriefSummary[] }>(`/api/content-briefs${projectId ? `?projectId=${encodeURIComponent(projectId)}` : ""}`),
+  createContentBrief: (cluster: KeywordCluster, projectId?: string, sourceAnalysisId?: string) => request<{ brief: ContentBrief }>("/api/content-briefs", {
+    method: "POST",
+    body: JSON.stringify({ cluster, projectId: projectId || undefined, sourceAnalysisId: sourceAnalysisId || undefined }),
+  }),
+  contentBriefById: (id: string) => request<{ brief: ContentBrief }>(`/api/content-briefs/${encodeURIComponent(id)}`),
+  updateContentBrief: (id: string, brief: ContentBrief) => request<{ brief: ContentBrief }>(`/api/content-briefs/${encodeURIComponent(id)}`, {
+    method: "PUT",
+    body: JSON.stringify({ brief }),
+  }),
+  internalLinkAnalyses: (projectId?: string) => request<{ analyses: InternalLinkAnalysisSummary[] }>(`/api/internal-link-analyses${projectId ? `?projectId=${encodeURIComponent(projectId)}` : ""}`),
+  analyzeInternalLinks: (auditId: string, projectId?: string) => request<{ analysis: InternalLinkAnalysis }>("/api/internal-link-analyses", {
+    method: "POST",
+    body: JSON.stringify({ auditId, projectId: projectId || undefined }),
+  }),
+  internalLinkAnalysisById: (id: string) => request<{ analysis: InternalLinkAnalysis }>(`/api/internal-link-analyses/${encodeURIComponent(id)}`),
+  monitors: () => request<{ monitors: MonitoringConfig[] }>("/api/monitors"),
+  createMonitor: (input: { projectId: string; name: string; rootUrl: string; maxPages: number; cadence: MonitorCadence }) => request<{ monitor: MonitoringConfig }>("/api/monitors", {
+    method: "POST",
+    body: JSON.stringify(input),
+  }),
+  updateMonitor: (id: string, enabled: boolean) => request<{ monitor: MonitoringConfig }>(`/api/monitors/${encodeURIComponent(id)}`, {
+    method: "PUT",
+    body: JSON.stringify({ enabled }),
+  }),
+  runMonitor: (id: string) => request<MonitorRunResult>(`/api/monitors/${encodeURIComponent(id)}/run`, { method: "POST" }),
+  monitoringAlerts: () => request<{ alerts: MonitoringAlert[] }>("/api/monitoring-alerts"),
+  readMonitoringAlert: (id: string) => request<{ ok: true }>(`/api/monitoring-alerts/${encodeURIComponent(id)}/read`, { method: "POST" }),
 };
