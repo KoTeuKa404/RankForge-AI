@@ -9,6 +9,27 @@ const BLOCKED_SUFFIXES = [".local", ".internal", ".localhost", ".home", ".lan"];
 const MAX_REDIRECTS = 5;
 const MAX_RESPONSE_BYTES = 1_500_000;
 const REQUEST_TIMEOUT_MS = 8_000;
+const MAX_CRAWL_QUERY_PARAMS = 12;
+
+const TRACKING_QUERY_PARAMS = new Set([
+  "gclid",
+  "dclid",
+  "fbclid",
+  "msclkid",
+  "yclid",
+  "mc_cid",
+  "mc_eid",
+  "ref",
+  "referrer",
+  "session",
+  "sessionid",
+  "sid",
+  "phpsessid",
+  "cachebust",
+  "cache_bust",
+  "timestamp",
+  "_",
+]);
 
 export class TargetValidationError extends Error {
   constructor(message: string) {
@@ -182,6 +203,15 @@ export async function safeFetchText(rawUrl: string | URL, init: RequestInit = {}
   throw new TargetValidationError("Unable to fetch the target.");
 }
 
+function removeTrackingParams(url: URL): void {
+  for (const key of [...url.searchParams.keys()]) {
+    const normalized = key.toLowerCase();
+    if (normalized.startsWith("utm_") || TRACKING_QUERY_PARAMS.has(normalized)) {
+      url.searchParams.delete(key);
+    }
+  }
+}
+
 export function canonicalizeCrawlUrl(raw: string, base: URL): string | null {
   try {
     const url = new URL(raw, base);
@@ -190,9 +220,8 @@ export function canonicalizeCrawlUrl(raw: string, base: URL): string | null {
     if (url.username || url.password) return null;
 
     url.hash = "";
-    for (const key of ["utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content", "gclid", "fbclid"]) {
-      url.searchParams.delete(key);
-    }
+    removeTrackingParams(url);
+    if ([...url.searchParams.keys()].length > MAX_CRAWL_QUERY_PARAMS) return null;
     url.searchParams.sort();
 
     const ignoredExtensions = /\.(?:jpg|jpeg|png|gif|webp|svg|ico|pdf|zip|rar|7z|mp4|webm|mp3|wav|css|js|json|xml|woff2?|ttf|eot)$/i;
