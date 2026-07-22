@@ -32,6 +32,19 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   return payload as T;
 }
 
+function compactAiPage(page: PageAudit): PageAudit {
+  return {
+    ...page,
+    title: page.title.slice(0, 300),
+    description: page.description.slice(0, 600),
+    canonical: page.canonical.slice(0, 1_000),
+    robots: page.robots.slice(0, 300),
+    h1: page.h1.slice(0, 5).map((value) => value.slice(0, 300)),
+    internalLinks: [],
+    externalLinks: [],
+  };
+}
+
 export const api = {
   me: () => request<UserIdentity>("/api/me"),
   projects: () => request<{ projects: Project[] }>("/api/projects"),
@@ -48,7 +61,7 @@ export const api = {
   aiFix: (issue: SeoIssue, pages: PageAudit[] = []) => request<{ fix: AiFix }>("/api/ai-fix", {
     method: "POST",
     // `page` remains backward-compatible with the existing endpoint; the server accepts one page or an array.
-    body: JSON.stringify({ issue, page: pages.slice(0, 12) }),
+    body: JSON.stringify({ issue, page: pages.slice(0, 12).map(compactAiPage) }),
   }),
   keywordAnalyses: (projectId?: string) => request<{ analyses: KeywordAnalysisSummary[] }>(`/api/keyword-analyses${projectId ? `?projectId=${encodeURIComponent(projectId)}` : ""}`),
   analyzeKeywords: (input: string, projectId?: string, name?: string) => request<{ analysis: KeywordAnalysis }>("/api/keyword-analyses", {
