@@ -19,8 +19,7 @@ CREATE TABLE IF NOT EXISTS audit_jobs (
   updated_at TEXT NOT NULL,
   started_at TEXT,
   finished_at TEXT,
-  FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE SET NULL,
-  FOREIGN KEY(audit_id) REFERENCES audits(id) ON DELETE SET NULL
+  FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE SET NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_audit_jobs_owner_updated
