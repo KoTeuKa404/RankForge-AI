@@ -2,8 +2,11 @@ export interface Env {
   DB?: D1Database;
   FILES?: R2Bucket;
   ASSETS?: Fetcher;
+  AI_PROVIDER?: string;
   OPENAI_API_KEY?: string;
   OPENAI_MODEL?: string;
+  GEMINI_API_KEY?: string;
+  GEMINI_MODEL?: string;
   MONITOR_TOKEN?: string;
   DEV_USER_EMAIL?: string;
   ENVIRONMENT?: string;
