@@ -1,11 +1,13 @@
 import app from "./index";
 import { getAiProviderStatus } from "./ai";
-import { createAuditJob } from "./audit-job-db";
-import { consumeRateLimit, userOwnsProject } from "./db";
+import { createAuditJob, getAuditJob, resetAuditJob } from "./audit-job-db";
+import { consumeRateLimit, getAudit, userOwnsProject } from "./db";
 import type { AuditQueueMessage, Env } from "./env";
 import { getIdentity } from "./env";
 import { handleSearchConsoleRequest } from "./gsc-routes";
+import { saveInternalLinkAnalysis } from "./internal-link-db";
 import { consumeAuditQueue, enqueueAuditJob, runScheduledMaintenance } from "./job-scheduler";
+import { analyzeInternalLinksSemantic } from "./semantic-links";
 import { normalizeTargetUrl, TargetValidationError } from "./security";
 import { assertAndIncrementUsage, readUsage } from "./usage";
 
@@ -73,6 +75,45 @@ async function handleAuditJobStart(
   return json({ job }, 202, { location: `/api/audit-jobs/${job.id}` });
 }
 
+async function handleAuditJobRetry(
+  request: Request,
+  env: Env,
+  context: ExecutionContext,
+): Promise<Response | null> {
+  const url = new URL(request.url);
+  const match = url.pathname.match(/^\/api\/audit-jobs\/([0-9a-f-]+)\/retry$/i);
+  if (request.method !== "POST" || !match) return null;
+  if (!env.DB) return json({ error: "D1 database is not configured." }, 503);
+  const ownerKey = await requestKey(request, env);
+  const reset = await resetAuditJob(env.DB, ownerKey, match[1]);
+  if (!reset) return json({ error: "Only failed jobs with fewer than three attempts can be retried." }, 409);
+  await enqueueAuditJob(env, context, ownerKey, match[1]);
+  const job = await getAuditJob(env.DB, ownerKey, match[1]);
+  return json({ job }, 202);
+}
+
+async function handleSemanticLinks(request: Request, env: Env): Promise<Response | null> {
+  const url = new URL(request.url);
+  if (request.method !== "POST" || url.pathname !== "/api/internal-link-analyses") return null;
+  const identity = getIdentity(request, env);
+  if (!identity) return json({ error: "Sign in with ChatGPT to analyze a saved crawl." }, 401);
+  if (!env.DB) return json({ error: "D1 database is not configured." }, 503);
+  const body = await request.json().catch(() => ({})) as { auditId?: unknown; projectId?: unknown };
+  if (typeof body.auditId !== "string" || !body.auditId) {
+    throw new TargetValidationError("Select a saved audit first.");
+  }
+  const audit = await getAudit(env.DB, identity.email, body.auditId);
+  if (!audit) return json({ error: "Audit not found." }, 404);
+  const projectId = typeof body.projectId === "string" && body.projectId ? body.projectId : null;
+  if (projectId && !(await userOwnsProject(env.DB, identity.email, projectId))) {
+    return json({ error: "Project not found." }, 404);
+  }
+  const analysis = await analyzeInternalLinksSemantic(env, audit);
+  analysis.projectId = projectId;
+  await saveInternalLinkAnalysis(env.DB, identity.email, analysis);
+  return json({ analysis }, 201);
+}
+
 export default {
   async fetch(request: Request, env: Env, context: ExecutionContext): Promise<Response> {
     try {
@@ -81,12 +122,14 @@ export default {
         const provider = getAiProviderStatus(env);
         return json({
           ok: true,
-          version: "0.8.0-beta.0",
+          version: "0.9.0-rc.1",
           database: Boolean(env.DB),
           asyncAudits: Boolean(env.DB),
           durableQueue: Boolean(env.AUDIT_QUEUE),
           reportStorage: Boolean(env.FILES),
           searchConsole: Boolean(env.GSC_CLIENT_ID && env.GSC_CLIENT_SECRET && env.GSC_TOKEN_SECRET),
+          semanticLinks: Boolean(env.GEMINI_API_KEY),
+          dnsPreflight: true,
           ai: provider.enabled,
           aiProvider: provider.preferred,
           aiMode: provider.mode,
@@ -101,6 +144,10 @@ export default {
 
       const auditStart = await handleAuditJobStart(request, env, context);
       if (auditStart) return auditStart;
+      const auditRetry = await handleAuditJobRetry(request, env, context);
+      if (auditRetry) return auditRetry;
+      const semanticLinks = await handleSemanticLinks(request, env);
+      if (semanticLinks) return semanticLinks;
 
       if (url.pathname.startsWith("/api/gsc/")) {
         if (request.method === "POST" && url.pathname === "/api/gsc/sync" && env.DB) {
