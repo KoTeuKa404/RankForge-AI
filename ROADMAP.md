@@ -1,6 +1,6 @@
 # RankForge AI roadmap
 
-## Stage 1 — Technical Audit MVP (this commit)
+## Stage 1 — Technical Audit MVP
 
 Status: implemented.
 
@@ -9,43 +9,93 @@ Status: implemented.
 - projects and audit history
 - bounded same-origin crawl
 - technical/on-page issue engine
-- SEO score and exports
-- AI Fix endpoint
-- D1 schema, rate limits, tests, security baseline
+- grouped findings and normalized SEO score
+- CSV, JSON, and HTML exports
+- Gemini and OpenAI AI Fix providers
+- D1 schema, rate limits, tests, and security baseline
 
 ## Stage 2 — Production hardening
 
-- pre-connect DNS resolution and private-address rejection through an external hardened fetch service
-- robots allow/disallow precedence and crawl-delay support
-- sitemap index discovery and sitemap URL seeding
-- crawl job chunking for runtime limits
-- idempotent job records and progress polling
+Status: in progress.
+
+Implemented:
+
+- redirect destination validation
+- tracking-parameter cleanup and query-variant limits
+- duplicate final-URL protection
+- robots user-agent group selection
+- Allow/Disallow longest-match precedence
+- bounded Crawl-delay support
+- sitemap.xml and robots-declared sitemap discovery
+- sitemap-index traversal and sitemap URL seeding
 - regression comparison between audits
-- CSV export and stored R2 report artifacts
-- accessibility audit and browser-level end-to-end tests
+- production-only dependency audit command
+- CI validation on main
+
+Remaining:
+
+- pre-connect DNS resolution and private-address rejection through a hardened fetch gateway
+- durable asynchronous crawl jobs, progress polling, retries, and idempotency
+- stored R2 report artifacts
+- browser-level end-to-end tests
+- accessibility audit
+- richer redirect-chain reporting
+- crawl budget and per-project usage controls
 
 ## Stage 3 — Keyword intelligence
 
-- CSV keyword import
-- embeddings-based clustering
+Status: beta implemented.
+
+Implemented:
+
+- keyword import from pasted text/CSV-like input
+- deterministic clustering
 - intent classification
 - primary/secondary keyword selection
-- cannibalization candidates
-- content map by URL and page type
+- overlap and cannibalization warnings
+- content map suggestions by page type
+
+Remaining:
+
+- embeddings-based clustering provider
+- search-volume and difficulty provider adapters
+- Google Search Console query ingestion
+- clustering evaluation dataset
 
 ## Stage 4 — Content operations
 
+Status: beta implemented.
+
+Implemented:
+
 - content brief generator
-- SERP/provider adapters
-- editorial approval states
-- content quality checks
+- editable briefs
+- editorial draft/review/approved states
+- title, meta description, H1, outline, questions, schema, and checklist suggestions
+
+Remaining:
+
+- live SERP/provider adapters
+- source citation workflow
+- content quality scoring
 - WordPress draft publishing adapter
-- schema markup generator
+- standalone schema markup generator and validator
 
 ## Stage 5 — Internal linking and Search Console
 
-- semantic link suggestions
-- orphan and depth visualization
+Status: partially implemented.
+
+Implemented:
+
+- internal-link suggestions
+- orphan and underlinked-page detection
+- anchor suggestions and confidence values
+- saved internal-link analyses
+
+Remaining:
+
+- semantic embeddings for link relevance
+- depth and graph visualization
 - anchor diversity checks
 - Google Search Console OAuth integration
 - query/page performance ingestion
@@ -53,13 +103,25 @@ Status: implemented.
 
 ## Stage 6 — Full SearchOps platform
 
-- scheduled monitoring through an external job runner
+Status: partially implemented.
+
+Implemented:
+
+- monitoring configurations
+- scheduled-run endpoint
+- audit comparisons
+- monitoring alerts
+
+Remaining:
+
+- production scheduler deployment validation
 - team roles and project permissions
-- alerts and webhooks
+- external alerts and webhooks
 - white-label reports
 - multi-site portfolio dashboard
 - evaluation suite for AI recommendations
 - cost and usage controls
+- billing and plan limits
 
 ## Definition of done for v1.0
 
