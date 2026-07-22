@@ -1,3 +1,5 @@
+import { assertPublicDnsTarget, DnsValidationError } from "./dns-security";
+
 const BLOCKED_HOSTS = new Set([
   "localhost",
   "localhost.localdomain",
@@ -163,6 +165,13 @@ export async function safeFetchText(rawUrl: string | URL, init: RequestInit = {}
   const started = Date.now();
 
   for (let redirect = 0; redirect <= MAX_REDIRECTS; redirect += 1) {
+    try {
+      await assertPublicDnsTarget(current.hostname);
+    } catch (error) {
+      if (error instanceof DnsValidationError) throw new TargetValidationError(error.message);
+      throw error;
+    }
+
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
     let response: Response;
@@ -174,7 +183,7 @@ export async function safeFetchText(rawUrl: string | URL, init: RequestInit = {}
         redirect: "manual",
         signal: controller.signal,
         headers: {
-          "user-agent": "RankForgeBot/0.1 (+technical SEO audit)",
+          "user-agent": "RankForgeBot/1.0 (+technical SEO audit)",
           accept: "text/html,application/xhtml+xml,text/plain,application/xml;q=0.9,*/*;q=0.1",
           ...(init.headers || {}),
         },
