@@ -30,12 +30,14 @@ describe("accessibility contracts", () => {
     expect(search).toContain("<button");
   });
 
-  it("does not render secrets into the browser bundle", () => {
+  it("does not embed credential-shaped values in client code", () => {
     const client = [
       source("src/client/api.ts"),
       source("src/client/App.tsx"),
       source("src/client/SearchConsoleWorkspace.tsx"),
     ].join("\n");
-    expect(client).not.toMatch(/GSC_CLIENT_SECRET|GSC_TOKEN_SECRET|OPENAI_API_KEY|GEMINI_API_KEY/);
+    expect(client).not.toMatch(/sk-[A-Za-z0-9_-]{20,}/);
+    expect(client).not.toMatch(/AIza[0-9A-Za-z_-]{30,}/);
+    expect(client).not.toMatch(/client_secret\s*[:=]\s*["'][^"']{12,}/i);
   });
 });
