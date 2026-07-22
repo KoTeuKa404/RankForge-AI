@@ -28,6 +28,8 @@ export interface StoredAuditJob extends AuditJob {
   toJSON(): AuditJob;
 }
 
+const STALE_RUNNING_MS = 5 * 60_000;
+
 function parseResult(raw: string | null): AuditResult | undefined {
   if (!raw) return undefined;
   try {
@@ -138,7 +140,25 @@ export async function createAuditJob(
   return job;
 }
 
+async function recoverStaleRunningJob(db: D1Database, ownerKey: string, id: string): Promise<void> {
+  const now = new Date().toISOString();
+  const staleBefore = new Date(Date.now() - STALE_RUNNING_MS).toISOString();
+  await db.prepare(
+    `UPDATE audit_jobs
+     SET status = 'failed', error = ?, updated_at = ?, finished_at = ?
+     WHERE id = ? AND owner_key = ? AND status = 'running' AND updated_at < ?`,
+  ).bind(
+    "The background Worker stopped before completion. Retry this audit job.",
+    now,
+    now,
+    id,
+    ownerKey,
+    staleBefore,
+  ).run();
+}
+
 export async function getAuditJob(db: D1Database, ownerKey: string, id: string): Promise<StoredAuditJob | null> {
+  await recoverStaleRunningJob(db, ownerKey, id);
   const row = await db.prepare(`SELECT ${JOB_COLUMNS} FROM audit_jobs WHERE id = ? AND owner_key = ? LIMIT 1`)
     .bind(id, ownerKey)
     .first<AuditJobRow>();
