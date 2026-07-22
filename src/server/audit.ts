@@ -6,14 +6,32 @@ interface CrawlOptions {
   maxPages: number;
 }
 
+interface RobotsRule {
+  pattern: string;
+  allow: boolean;
+  specificity: number;
+}
+
 interface RobotsRules {
-  disallow: string[];
+  rules: RobotsRule[];
   sitemaps: string[];
+  crawlDelayMs: number;
+}
+
+interface RobotsGroup {
+  agents: string[];
+  rules: RobotsRule[];
+  crawlDelayMs: number;
 }
 
 interface ScoreBucket {
   count: number;
   affectedUrls: Set<string>;
+}
+
+export interface SitemapDocument {
+  kind: "urlset" | "sitemapindex" | null;
+  locations: string[];
 }
 
 const severityBasePenalty: Record<Severity, number> = {
@@ -38,6 +56,10 @@ const issuePenaltyCap: Record<Severity, number> = {
 };
 
 const MAX_QUERY_VARIANTS_PER_PATH = 5;
+const MAX_SITEMAP_FILES = 6;
+const MAX_SITEMAP_URLS = 100;
+const MAX_CRAWL_DELAY_MS = 2_000;
+const ROBOT_NAME = "rankforgebot";
 
 function text(element: ReturnType<typeof parse> | null | undefined): string {
   return element?.textContent.replace(/\s+/g, " ").trim() || "";
@@ -174,6 +196,12 @@ export function evaluatePage(page: PageAudit): SeoIssue[] {
     try {
       const canonical = new URL(page.canonical, pageUrl);
       if (canonical.protocol !== "https:" && canonical.protocol !== "http:") throw new Error();
+      if (canonical.origin !== new URL(pageUrl).origin) {
+        issues.push(makeIssue("canonical-cross-origin", "medium", "Canonical points to another origin", "The canonical URL belongs to a different origin and may remove this page from search results.", "Confirm the cross-domain canonical is intentional and verified; otherwise use the preferred same-origin URL.", pageUrl, canonical.toString()));
+      }
+      if (canonical.hash) {
+        issues.push(makeIssue("canonical-fragment", "low", "Canonical contains a fragment", "Search engines generally ignore fragments when canonicalizing documents.", "Remove the fragment and reference the clean preferred document URL.", pageUrl, canonical.toString()));
+      }
     } catch {
       issues.push(makeIssue("canonical-invalid", "high", "Invalid canonical", "The canonical URL cannot be resolved.", "Use an absolute, valid HTTP or HTTPS canonical URL.", pageUrl, page.canonical));
     }
@@ -201,15 +229,28 @@ export function evaluatePage(page: PageAudit): SeoIssue[] {
   return issues;
 }
 
-function wildcardToRegex(pattern: string): RegExp {
-  const escaped = pattern.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*");
-  return new RegExp(`^${escaped}`);
+function robotsPatternRegex(pattern: string): RegExp {
+  const anchored = pattern.endsWith("$");
+  const source = anchored ? pattern.slice(0, -1) : pattern;
+  const escaped = source.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*");
+  return new RegExp(`^${escaped}${anchored ? "$" : ""}`);
 }
 
-function parseRobots(body: string): RobotsRules {
-  const disallow: string[] = [];
+function groupMatchesAgent(group: RobotsGroup, agent: string): boolean {
+  return group.agents.some((value) => value !== "*" && agent.startsWith(value));
+}
+
+export function parseRobots(body: string): RobotsRules {
+  const groups: RobotsGroup[] = [];
   const sitemaps: string[] = [];
-  let applies = false;
+  let current: RobotsGroup = { agents: [], rules: [], crawlDelayMs: 0 };
+  let hasDirectives = false;
+
+  const flush = () => {
+    if (current.agents.length > 0) groups.push(current);
+    current = { agents: [], rules: [], crawlDelayMs: 0 };
+    hasDirectives = false;
+  };
 
   for (const originalLine of body.split(/\r?\n/)) {
     const line = originalLine.split("#", 1)[0].trim();
@@ -219,16 +260,55 @@ function parseRobots(body: string): RobotsRules {
     const field = line.slice(0, separator).trim().toLowerCase();
     const value = line.slice(separator + 1).trim();
 
-    if (field === "user-agent") applies = value === "*" || value.toLowerCase().includes("rankforgebot");
-    else if (field === "disallow" && applies && value) disallow.push(value);
-    else if (field === "sitemap" && value) sitemaps.push(value);
+    if (field === "sitemap") {
+      if (value) sitemaps.push(value);
+      continue;
+    }
+
+    if (field === "user-agent") {
+      if (current.agents.length > 0 && hasDirectives) flush();
+      if (value) current.agents.push(value.toLowerCase());
+      continue;
+    }
+
+    if (current.agents.length === 0) continue;
+    if (field === "allow" || field === "disallow") {
+      hasDirectives = true;
+      if (!value && field === "disallow") continue;
+      if (!value) continue;
+      current.rules.push({
+        pattern: value,
+        allow: field === "allow",
+        specificity: value.replace(/[\*$]/g, "").length,
+      });
+    } else if (field === "crawl-delay") {
+      hasDirectives = true;
+      const seconds = Number(value);
+      if (Number.isFinite(seconds) && seconds >= 0) {
+        current.crawlDelayMs = Math.min(MAX_CRAWL_DELAY_MS, Math.round(seconds * 1_000));
+      }
+    }
   }
-  return { disallow, sitemaps };
+  flush();
+
+  const specific = groups.filter((group) => groupMatchesAgent(group, ROBOT_NAME));
+  const selected = specific.length > 0
+    ? specific
+    : groups.filter((group) => group.agents.includes("*"));
+
+  return {
+    rules: selected.flatMap((group) => group.rules),
+    sitemaps: [...new Set(sitemaps)],
+    crawlDelayMs: selected.reduce((maximum, group) => Math.max(maximum, group.crawlDelayMs), 0),
+  };
 }
 
-function isAllowedByRobots(url: URL, rules: RobotsRules): boolean {
+export function isAllowedByRobots(url: URL, rules: RobotsRules): boolean {
   const path = `${url.pathname}${url.search}`;
-  return !rules.disallow.some((rule) => wildcardToRegex(rule).test(path));
+  const matching = rules.rules
+    .filter((rule) => robotsPatternRegex(rule.pattern).test(path))
+    .sort((a, b) => b.specificity - a.specificity || Number(b.allow) - Number(a.allow));
+  return matching.length === 0 || matching[0].allow;
 }
 
 async function loadRobots(root: URL): Promise<{ rules: RobotsRules; found: boolean }> {
@@ -238,23 +318,80 @@ async function loadRobots(root: URL): Promise<{ rules: RobotsRules; found: boole
   } catch {
     // Absence or network failure is reported separately but does not block the crawl.
   }
-  return { rules: { disallow: [], sitemaps: [] }, found: false };
+  return { rules: { rules: [], sitemaps: [], crawlDelayMs: 0 }, found: false };
 }
 
-async function sitemapExists(root: URL, declaredSitemaps: string[]): Promise<boolean> {
+function decodeXml(value: string): string {
+  return value
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;|&apos;/gi, "'")
+    .trim();
+}
+
+export function parseSitemapDocument(xml: string): SitemapDocument {
+  const kind = /<sitemapindex\b/i.test(xml)
+    ? "sitemapindex"
+    : /<urlset\b/i.test(xml)
+      ? "urlset"
+      : null;
+  if (!kind) return { kind: null, locations: [] };
+
+  const locations: string[] = [];
+  const pattern = /<loc\b[^>]*>([\s\S]*?)<\/loc>/gi;
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(xml)) && locations.length < MAX_SITEMAP_URLS) {
+    const value = decodeXml(match[1].replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1"));
+    if (value) locations.push(value);
+  }
+  return { kind, locations };
+}
+
+async function discoverSitemapUrls(root: URL, declaredSitemaps: string[]): Promise<{ found: boolean; urls: string[] }> {
   const declared = declaredSitemaps.map((value) => {
     try { return new URL(value, root).toString(); } catch { return ""; }
   }).filter(Boolean);
-  const candidates = [new URL("/sitemap.xml", root).toString(), ...declared].filter((value, index, values) => values.indexOf(value) === index).slice(0, 4);
-  for (const candidate of candidates) {
+  const queue = [new URL("/sitemap.xml", root).toString(), ...declared]
+    .filter((value, index, values) => values.indexOf(value) === index)
+    .slice(0, MAX_SITEMAP_FILES);
+  const visited = new Set<string>();
+  const urls = new Set<string>();
+  let found = false;
+
+  while (queue.length > 0 && visited.size < MAX_SITEMAP_FILES && urls.size < MAX_SITEMAP_URLS) {
+    const candidate = queue.shift();
+    if (!candidate || visited.has(candidate)) continue;
+    visited.add(candidate);
     try {
       const result = await safeFetchText(candidate, { method: "GET" });
-      if (result.response.ok && /<(?:urlset|sitemapindex)\b/i.test(result.body)) return true;
+      if (!result.response.ok) continue;
+      const document = parseSitemapDocument(result.body);
+      if (!document.kind) continue;
+      found = true;
+      if (document.kind === "sitemapindex") {
+        for (const location of document.locations) {
+          try {
+            const nested = new URL(location, candidate).toString();
+            if (!visited.has(nested) && !queue.includes(nested) && visited.size + queue.length < MAX_SITEMAP_FILES) queue.push(nested);
+          } catch {
+            // Ignore malformed sitemap references.
+          }
+        }
+      } else {
+        for (const location of document.locations) {
+          const canonical = canonicalizeCrawlUrl(location, root);
+          if (canonical) urls.add(canonical);
+          if (urls.size >= MAX_SITEMAP_URLS) break;
+        }
+      }
     } catch {
-      // Try the next declared sitemap before reporting the site-wide issue.
+      // Try the next sitemap before reporting it as absent.
     }
   }
-  return false;
+
+  return { found, urls: [...urls] };
 }
 
 function addSiteWideIssues(pages: PageAudit[], issues: SeoIssue[], rootUrl: string, robotsFound: boolean, sitemapFound: boolean): void {
@@ -395,6 +532,28 @@ function addNonHtmlStatusIssue(issues: SeoIssue[], url: string, status: number):
   }
 }
 
+function enqueueSitemapUrls(
+  urls: string[],
+  root: URL,
+  queue: string[],
+  queued: Set<string>,
+  visited: Set<string>,
+  allowQueryVariant: (url: string) => boolean,
+): void {
+  for (const raw of urls) {
+    const canonical = canonicalizeCrawlUrl(raw, root);
+    if (!canonical || queued.has(canonical) || visited.has(canonical) || !allowQueryVariant(canonical)) continue;
+    queued.add(canonical);
+    queue.push(canonical);
+  }
+}
+
+async function respectCrawlDelay(delayMs: number, lastFetchAt: number): Promise<void> {
+  if (delayMs <= 0 || lastFetchAt <= 0) return;
+  const remaining = delayMs - (Date.now() - lastFetchAt);
+  if (remaining > 0) await new Promise((resolve) => setTimeout(resolve, remaining));
+}
+
 export async function auditSite(rawUrl: string, options: CrawlOptions): Promise<AuditResult> {
   const startedAt = new Date();
   const root = normalizeTargetUrl(rawUrl);
@@ -405,16 +564,19 @@ export async function auditSite(rawUrl: string, options: CrawlOptions): Promise<
   let robotsResult = await loadRobots(crawlBase);
   let rules = robotsResult.rules;
   let robotsTxtFound = robotsResult.found;
-  let sitemapFound = await sitemapExists(crawlBase, rules.sitemaps);
+  let sitemapResult = await discoverSitemapUrls(crawlBase, rules.sitemaps);
+  let sitemapFound = sitemapResult.found;
   const queue: string[] = [root.toString()];
   const queued = new Set(queue);
   const visited = new Set<string>();
   const auditedFinalUrls = new Set<string>();
   const allowQueryVariant = createQueryVariantGuard();
   allowQueryVariant(root.toString());
+  enqueueSitemapUrls(sitemapResult.urls, crawlBase, queue, queued, visited, allowQueryVariant);
   const pages: PageAudit[] = [];
   const issues: SeoIssue[] = [];
   let stoppedReason: string | undefined;
+  let lastFetchAt = 0;
 
   while (queue.length && pages.length < maxPages) {
     const next = queue.shift();
@@ -428,7 +590,9 @@ export async function auditSite(rawUrl: string, options: CrawlOptions): Promise<
     }
 
     try {
+      await respectCrawlDelay(rules.crawlDelayMs, lastFetchAt);
       const fetched = await safeFetchText(url);
+      lastFetchAt = Date.now();
       const contentType = fetched.response.headers.get("content-type") || "";
       let finalUrl = canonicalizeCrawlUrl(fetched.finalUrl.toString(), crawlBase);
       if (!finalUrl && pages.length === 0 && auditedFinalUrls.size === 0) {
@@ -436,9 +600,16 @@ export async function auditSite(rawUrl: string, options: CrawlOptions): Promise<
         robotsResult = await loadRobots(crawlBase);
         rules = robotsResult.rules;
         robotsTxtFound = robotsResult.found;
-        sitemapFound = await sitemapExists(crawlBase, rules.sitemaps);
+        sitemapResult = await discoverSitemapUrls(crawlBase, rules.sitemaps);
+        sitemapFound = sitemapResult.found;
+        queue.splice(0, queue.length);
+        queued.clear();
         finalUrl = canonicalizeCrawlUrl(fetched.finalUrl.toString(), crawlBase);
-        if (finalUrl) allowQueryVariant(finalUrl);
+        if (finalUrl) {
+          queued.add(finalUrl);
+          allowQueryVariant(finalUrl);
+        }
+        enqueueSitemapUrls(sitemapResult.urls, crawlBase, queue, queued, visited, allowQueryVariant);
       }
       if (!finalUrl) {
         issues.push(makeIssue("external-redirect", "medium", "Internal URL redirects off-site", "The URL redirects to a different origin, so the crawler did not analyze the destination.", "Review the redirect and keep internal navigation on the intended site when appropriate.", next, fetched.finalUrl.toString()));
