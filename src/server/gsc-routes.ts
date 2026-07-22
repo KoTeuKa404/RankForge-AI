@@ -48,6 +48,15 @@ async function ownedProject(
   return projectId;
 }
 
+function workspaceRedirect(origin: string, status: "connected" | "error", projectId?: string, reason?: string): URL {
+  const target = new URL("/", origin);
+  target.searchParams.set("workspace", "search");
+  target.searchParams.set("gsc", status);
+  if (projectId) target.searchParams.set("projectId", projectId);
+  if (reason) target.searchParams.set("reason", reason);
+  return target;
+}
+
 export async function handleSearchConsoleRequest(request: Request, env: Env): Promise<Response | null> {
   const url = new URL(request.url);
   if (!url.pathname.startsWith("/api/gsc/")) return null;
@@ -58,18 +67,15 @@ export async function handleSearchConsoleRequest(request: Request, env: Env): Pr
     const code = url.searchParams.get("code") || "";
     const oauthError = url.searchParams.get("error");
     if (oauthError) {
-      return Response.redirect(new URL(`/?gsc=error&reason=${encodeURIComponent(oauthError)}`, url.origin), 302);
+      return Response.redirect(workspaceRedirect(url.origin, "error", undefined, oauthError), 302);
     }
     if (!state || !code) return json({ error: "Google OAuth callback is incomplete." }, 400);
     try {
       const result = await completeSearchConsoleAuthorization(env, env.DB, state, code);
-      return Response.redirect(
-        new URL(`/?gsc=connected&projectId=${encodeURIComponent(result.projectId)}`, url.origin),
-        302,
-      );
+      return Response.redirect(workspaceRedirect(url.origin, "connected", result.projectId), 302);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Google OAuth failed.";
-      return Response.redirect(new URL(`/?gsc=error&reason=${encodeURIComponent(message)}`, url.origin), 302);
+      return Response.redirect(workspaceRedirect(url.origin, "error", undefined, message), 302);
     }
   }
 
