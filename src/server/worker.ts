@@ -10,20 +10,22 @@ const HEALTH_HEADERS = {
 };
 
 export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
+  async fetch(request: Request, env: Env, context: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
     if (request.method === "GET" && url.pathname === "/api/health") {
       const provider = getAiProviderStatus(env);
       return new Response(JSON.stringify({
         ok: true,
-        version: "0.6.0",
+        version: "0.7.0-beta",
         database: Boolean(env.DB),
+        asyncAudits: Boolean(env.DB),
+        reportStorage: Boolean(env.FILES),
         ai: provider.enabled,
         aiProvider: provider.preferred,
         aiMode: provider.mode,
         aiProviders: provider.available,
       }), { headers: HEALTH_HEADERS });
     }
-    return app.fetch(request, env);
+    return app.fetch(request, env, context);
   },
 };
