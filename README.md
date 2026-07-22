@@ -1,29 +1,58 @@
 # RankForge AI
 
-RankForge AI v0.7 beta is a technical SEO and SearchOps application built for ChatGPT Sites and Cloudflare Workers. It crawls public websites, groups and prioritizes findings, stores project history in D1, creates asynchronous audit jobs, saves report artifacts in R2, and generates implementation-ready remediation guidance with Gemini or OpenAI.
+RankForge AI `1.0.0-rc.1` is a technical SEO and SearchOps application for ChatGPT Sites and Cloudflare Workers. It combines a security-bounded crawler, durable audit jobs, Google Search Console evidence, semantic internal-link recommendations, monitoring, content operations, and quality-gated AI remediation.
 
-## Current beta features
+The repository is a release candidate. Promote it to stable `1.0.0` only after the local and hosted acceptance checks in `PRODUCTION_DEPLOYMENT.md` pass.
 
-- asynchronous D1-backed audit jobs with `queued`, `running`, `completed`, and `failed` states
-- browser polling, progress heartbeat, timeout handling, and up to three manual attempts
-- optional JSON report artifacts stored in R2
-- bounded same-origin crawler with 5, 10, or 25 page limits
-- SSRF protection, redirect validation, response timeouts, and body limits
-- robots.txt parsing with specific user-agent groups, Allow/Disallow precedence, and bounded crawl delay
-- sitemap.xml and sitemap-index discovery with sitemap URL seeding
-- metadata, H1, canonical, noindex, language, content depth, image alt, Open Graph, schema, status, and latency checks
-- grouped site-template findings and normalized SEO scoring
-- projects, audit history, and regression comparisons in D1
-- CSV, JSON, standalone HTML, and stored R2 JSON exports
-- keyword clustering and intent classification
-- editable content briefs
-- internal-link suggestions and orphan-page analysis
-- scheduled monitoring configuration and alerts
-- AI Fix through Gemini, OpenAI, or automatic provider fallback
+## Product capabilities
+
+### Technical SEO crawler
+
+- bounded same-origin crawls with 5, 10, or 25 page limits
+- D1-backed asynchronous jobs with `queued`, `running`, `completed`, and `failed` states
+- Cloudflare Queue execution with retries, dead-letter queue, and scheduled stale-job recovery
+- Worker execution-context fallback when Queue is unavailable
+- phase-aware progress, retry UI, audit history, and before/after comparison
+- R2 JSON report artifacts plus CSV, JSON, and standalone HTML exports
+- robots.txt user-agent groups, Allow/Disallow precedence, bounded crawl delay
+- sitemap and sitemap-index discovery with URL seeding
+- title, description, H1, canonical, noindex, language, content depth, image-alt, Open Graph, schema, response status, and latency checks
+- grouped template findings and normalized scoring
+
+### Security and reliability
+
+- public HTTP/HTTPS targets on standard ports only
+- literal private, local, loopback, link-local, reserved, and credential-bearing URL rejection
+- A/AAAA DNS-over-HTTPS preflight before every connection and redirect
+- redirect destination validation, response timeout, body-size limit, query-variant limit, and final-URL deduplication
+- server-side secrets only
+- AES-GCM encryption for Google OAuth tokens stored in D1
+- monthly audit, AI, Search Console, and crawl-page limits
+- production dependency audit, CI, release contracts, and hosted smoke tests
+
+### Search evidence
+
+- Google Search Console OAuth
+- automatic token refresh
+- property selection
+- 7, 28, or 90 day query/page synchronization
+- clicks, impressions, CTR, and average-position summaries
+- striking-distance, low-CTR, and high-impression opportunity scoring
+- saved Search Console snapshots
+
+### SearchOps workflows
+
+- keyword import, deterministic clustering, intent classification, primary keywords, overlap warnings, and content maps
+- editable content briefs with workflow states
+- internal-link suggestions, orphan pages, anchor ideas, and confidence values
+- optional Gemini Embedding 2 semantic enhancement with deterministic fallback
+- monitor configurations, scheduled runs, comparisons, and alerts
+- Gemini and OpenAI AI Fix with provider fallback
+- server-side AI recommendation quality gate that rejects manipulative tactics and unsupported ranking guarantees
 
 ## Local setup
 
-Requirements: Node.js 22+.
+Requirements: Node.js 22 or newer.
 
 ```cmd
 npm install
@@ -35,135 +64,127 @@ npm run dev
 Open:
 
 - frontend: `http://localhost:5173`
-- worker API: `http://127.0.0.1:8787`
+- Worker/API: `http://127.0.0.1:8787`
 - health: `http://127.0.0.1:8787/api/health`
+- Search Console workspace: `http://localhost:5173/?workspace=search`
 
-`npm run dev` rebuilds the frontend before starting both local servers. During rapid frontend development, `npm run dev:fast` skips the initial build.
+Run the local runtime smoke test in another terminal:
 
-Windows helpers are also included:
+```cmd
+npm run smoke
+```
+
+Windows helpers:
 
 ```cmd
 powershell -NoProfile -ExecutionPolicy Bypass -File .\setup-local.ps1
 run-local.bat
 ```
 
-## AI provider configuration
+`npm run dev` rebuilds the frontend before starting Vite and Wrangler. `npm run dev:fast` skips the initial build during rapid frontend work.
 
-Create an ignored `.dev.vars` file.
+## Environment configuration
 
-Gemini only:
+Copy `.dev.vars.example` to `.dev.vars`. Never commit `.dev.vars`.
+
+Minimum local values:
 
 ```dotenv
+ENVIRONMENT=development
+DEV_USER_EMAIL=developer@localhost
 AI_PROVIDER=gemini
 GEMINI_API_KEY=your_key
 GEMINI_MODEL=gemini-3.5-flash
-ENVIRONMENT=development
-DEV_USER_EMAIL=developer@localhost
+GEMINI_EMBEDDING_MODEL=gemini-embedding-2
+MONITOR_TOKEN=replace_with_at_least_32_random_characters
 ```
 
-OpenAI only:
-
-```dotenv
-AI_PROVIDER=openai
-OPENAI_API_KEY=your_key
-OPENAI_MODEL=gpt-5
-ENVIRONMENT=development
-DEV_USER_EMAIL=developer@localhost
-```
-
-Automatic fallback:
+OpenAI can be used instead of or alongside Gemini:
 
 ```dotenv
 AI_PROVIDER=auto
 OPENAI_API_KEY=your_openai_key
 OPENAI_MODEL=gpt-5
 GEMINI_API_KEY=your_gemini_key
-GEMINI_MODEL=gemini-3.5-flash
 ```
 
-Secrets must remain server-side and must never be committed.
+For Google Search Console local development, create an OAuth Web application, enable the Search Console API, and configure:
 
-## Asynchronous audit API
-
-Create a job:
-
-```http
-POST /api/audit-jobs
-Content-Type: application/json
-
-{
-  "url": "https://example.com",
-  "maxPages": 25,
-  "projectId": null
-}
+```dotenv
+GSC_CLIENT_ID=
+GSC_CLIENT_SECRET=
+GSC_TOKEN_SECRET=replace_with_at_least_32_random_characters
+GSC_REDIRECT_URI=http://localhost:8787/api/gsc/callback
 ```
 
-Poll it:
-
-```http
-GET /api/audit-jobs/{jobId}
-```
-
-Retry a failed job with fewer than three attempts:
-
-```http
-POST /api/audit-jobs/{jobId}/retry
-```
-
-Download the stored R2 JSON report after completion:
-
-```http
-GET /api/audit-jobs/{jobId}/report
-```
-
-The current beta uses the Worker execution context to finish jobs after returning `202 Accepted`. A future production-scale release should move execution to a durable queue or workflow runner for stronger recovery guarantees.
-
-## Validation
+## Validation commands
 
 ```cmd
 npm run build
 npm run test
+npm run release:check
 npm run audit:prod
 ```
 
-Or run all production checks:
+Run all production checks:
 
 ```cmd
 npm run check
 ```
 
-A full development-tool audit remains available separately:
+Run the complete local release verification while the Worker is running:
+
+```cmd
+npm run release:verify
+```
+
+The full development dependency audit remains separate:
 
 ```cmd
 npm run audit:all
 ```
 
-## ChatGPT Sites deployment
+## Important API routes
 
-The repository includes `.openai/hosting.json` with:
+- `POST /api/audit-jobs`
+- `GET /api/audit-jobs/{jobId}`
+- `POST /api/audit-jobs/{jobId}/retry`
+- `GET /api/audit-jobs/{jobId}/report`
+- `POST /api/ai-fix`
+- `GET /api/usage`
+- `GET /api/gsc/status`
+- `POST /api/gsc/connect`
+- `GET /api/gsc/callback`
+- `GET /api/gsc/properties`
+- `POST /api/gsc/select-property`
+- `POST /api/gsc/sync`
+- `GET /api/gsc/snapshots`
 
-- D1 binding: `DB`
-- R2 binding: `FILES`
+## Cloudflare deployment
 
-Apply migrations `0001_initial.sql` through `0007_audit_jobs.sql` and configure hosted secrets before publishing.
+RankForge uses these bindings:
 
-Recommended first deployment flow:
+- D1: `DB`
+- R2: `FILES`
+- Queue producer: `AUDIT_QUEUE`
+- static assets: `ASSETS`
 
-1. create a private preview;
-2. apply all seven D1 migrations;
-3. verify `/api/health` reports `asyncAudits: true` and `reportStorage: true`;
-4. run one single-page and one 25-page asynchronous crawl;
-5. verify progress polling, project persistence, audit comparison, and R2 report download;
-6. test AI Fix using the selected provider;
-7. test localhost/private-address blocking;
-8. publish only after the preview passes.
+Apply migrations `0001` through `0008`. Create the primary Queue and dead-letter Queue before the first hosted deployment. Full commands, secrets, Google OAuth setup, smoke tests, and the stable promotion procedure are documented in `PRODUCTION_DEPLOYMENT.md`.
 
-## Security boundaries
+## ChatGPT Sites
 
-The crawler accepts only public HTTP/HTTPS targets on standard ports. It blocks local/private/reserved literal targets, validates redirect destinations, limits query variants, validates every fetched target, respects applicable robots rules, and restricts crawl depth through a hard page limit.
+`.openai/hosting.json` declares D1 and R2. A private Sites preview can use the execution-context fallback when Queue is not exposed by the runtime. Confirm project persistence, crawler safety, AI Fix, report downloads, and Google OAuth against the exact preview hostname before publishing.
 
-A future production-scale version should add a dedicated pre-connect DNS resolver and fetch gateway to reject private/reserved DNS answers before each connection.
+## Release status
 
-## Project status
+Current version: `1.0.0-rc.1`.
 
-This repository is a working v0.7 beta, not the final v1.0 SearchOps platform. See `ROADMAP.md` for completed and remaining production work.
+Stable `1.0.0` requires:
+
+1. a clean `npm install` that synchronizes `package-lock.json`;
+2. all migrations applied;
+3. `npm run check` passing;
+4. local and hosted `npm run smoke` passing;
+5. Google Search Console OAuth verified against the deployment hostname;
+6. Queue retry/recovery and scheduled monitoring verified;
+7. responsive, keyboard, and accessibility review completed.
