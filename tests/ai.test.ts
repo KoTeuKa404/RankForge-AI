@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { generateAiFix, getAiProviderStatus } from "../src/server/ai";
-import type { SeoIssue } from "../src/shared/types";
+import type { PageAudit, SeoIssue } from "../src/shared/types";
 
 const issue: SeoIssue = {
   id: "issue-1",
@@ -20,6 +20,31 @@ const fix = {
   verification: ["Reload the page", "Inspect the title element"],
 };
 
+function page(url: string, title: string): PageAudit {
+  return {
+    url,
+    status: 200,
+    contentType: "text/html",
+    loadTimeMs: 100,
+    title,
+    description: "Description",
+    canonical: url,
+    robots: "index,follow",
+    lang: "en",
+    h1: [],
+    headingCount: 2,
+    wordCount: 250,
+    imageCount: 0,
+    imagesMissingAlt: 0,
+    internalLinks: [],
+    externalLinks: [],
+    schemaCount: 0,
+    ogTitle: title,
+    ogDescription: "Description",
+    incomingLinks: 1,
+  };
+}
+
 afterEach(() => {
   vi.unstubAllGlobals();
 });
@@ -34,13 +59,20 @@ describe("AI provider selection", () => {
     });
   });
 
-  it("uses Gemini generateContent with structured JSON output", async () => {
+  it("uses Gemini generateContent with structured JSON and grouped page context", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       expect(String(input)).toContain("/models/gemini-3.5-flash:generateContent");
       const headers = new Headers(init?.headers);
       expect(headers.get("x-goog-api-key")).toBe("gem-key");
       const body = JSON.parse(String(init?.body)) as Record<string, any>;
       expect(body.generationConfig.responseMimeType).toBe("application/json");
+      const prompt = JSON.parse(body.contents[0].parts[0].text) as Record<string, any>;
+      expect(prompt.affectedPageCount).toBe(2);
+      expect(prompt.affectedPages.map((item: PageAudit) => item.url)).toEqual([
+        "https://example.com/products",
+        "https://example.com/docs",
+      ]);
+      expect(prompt.guidance).toContain("template-level");
       return new Response(JSON.stringify({
         candidates: [{ content: { parts: [{ text: JSON.stringify(fix) }] } }],
       }), { status: 200, headers: { "content-type": "application/json" } });
@@ -51,9 +83,12 @@ describe("AI provider selection", () => {
       AI_PROVIDER: "gemini",
       GEMINI_API_KEY: "gem-key",
       GEMINI_MODEL: "gemini-3.5-flash",
-    }, issue, undefined, "user:test");
+    }, issue, [
+      page("https://example.com/products", "Products"),
+      page("https://example.com/docs", "Documentation"),
+    ], "user:test");
 
-    expect(result).toEqual(fix);
+    expect(result).toEqual({ ...fix, provider: "gemini" });
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
@@ -76,6 +111,7 @@ describe("AI provider selection", () => {
     }, issue, undefined, "user:test");
 
     expect(result.summary).toBe(fix.summary);
+    expect(result.provider).toBe("gemini");
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(String(fetchMock.mock.calls[1][0])).toContain("generativelanguage.googleapis.com");
   });
