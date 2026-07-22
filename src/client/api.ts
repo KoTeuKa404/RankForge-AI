@@ -1,5 +1,6 @@
 import type {
   AiFix,
+  AuditJob,
   AuditResult,
   AuditSummary,
   ContentBrief,
@@ -45,6 +46,31 @@ function compactAiPage(page: PageAudit): PageAudit {
   };
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function waitForAuditJob(
+  initial: AuditJob,
+  onProgress?: (job: AuditJob) => void,
+): Promise<AuditResult> {
+  let job = initial;
+  const deadline = Date.now() + 180_000;
+  onProgress?.(job);
+
+  while (job.status === "queued" || job.status === "running") {
+    if (Date.now() > deadline) throw new Error("The audit is still running. Reopen the job or retry shortly.");
+    await sleep(600);
+    const response = await request<{ job: AuditJob }>(`/api/audit-jobs/${encodeURIComponent(job.id)}`);
+    job = response.job;
+    onProgress?.(job);
+  }
+
+  if (job.status === "failed") throw new Error(job.error || "The audit job failed.");
+  if (!job.audit) throw new Error("The completed audit job did not contain a result.");
+  return job.audit;
+}
+
 export const api = {
   me: () => request<UserIdentity>("/api/me"),
   projects: () => request<{ projects: Project[] }>("/api/projects"),
@@ -53,14 +79,22 @@ export const api = {
     body: JSON.stringify({ name, rootUrl }),
   }),
   audits: (projectId?: string) => request<{ audits: AuditSummary[] }>(`/api/audits${projectId ? `?projectId=${encodeURIComponent(projectId)}` : ""}`),
-  audit: (url: string, maxPages: number, projectId?: string) => request<{ audit: AuditResult }>("/api/audits", {
+  startAuditJob: (url: string, maxPages: number, projectId?: string) => request<{ job: AuditJob }>("/api/audit-jobs", {
     method: "POST",
     body: JSON.stringify({ url, maxPages, projectId: projectId || undefined }),
   }),
+  auditJob: (id: string) => request<{ job: AuditJob }>(`/api/audit-jobs/${encodeURIComponent(id)}`),
+  retryAuditJob: (id: string) => request<{ job: AuditJob }>(`/api/audit-jobs/${encodeURIComponent(id)}/retry`, { method: "POST" }),
+  audit: async (url: string, maxPages: number, projectId?: string, onProgress?: (job: AuditJob) => void) => {
+    const started = await request<{ job: AuditJob }>("/api/audit-jobs", {
+      method: "POST",
+      body: JSON.stringify({ url, maxPages, projectId: projectId || undefined }),
+    });
+    return { audit: await waitForAuditJob(started.job, onProgress) };
+  },
   auditById: (id: string) => request<{ audit: AuditResult }>(`/api/audits/${encodeURIComponent(id)}`),
   aiFix: (issue: SeoIssue, pages: PageAudit[] = []) => request<{ fix: AiFix }>("/api/ai-fix", {
     method: "POST",
-    // `page` remains backward-compatible with the existing endpoint; the server accepts one page or an array.
     body: JSON.stringify({ issue, page: pages.slice(0, 12).map(compactAiPage) }),
   }),
   keywordAnalyses: (projectId?: string) => request<{ analyses: KeywordAnalysisSummary[] }>(`/api/keyword-analyses${projectId ? `?projectId=${encodeURIComponent(projectId)}` : ""}`),
