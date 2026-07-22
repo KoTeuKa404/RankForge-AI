@@ -31,8 +31,11 @@ Implemented:
 - regression comparison between audits
 - D1-backed asynchronous audit job records
 - queued/running/completed/failed job states
-- browser polling and progress heartbeat
-- failed-job retry endpoint with a three-attempt limit
+- browser polling and phase-aware progress
+- persisted crawl phase, current URL, processed-page count, and queue size fields
+- stale-running-job detection after five minutes
+- failed-job retry endpoint and UI with a three-attempt limit
+- internal ownership fields hidden from audit-job API responses
 - R2 JSON report artifacts and protected download endpoint
 - production-only dependency audit command
 - CI validation on main
@@ -41,8 +44,8 @@ Remaining:
 
 - pre-connect DNS resolution and private-address rejection through a hardened fetch gateway
 - durable Queue/Workflow execution beyond Worker `waitUntil`
-- stale-running-job recovery and idempotent queue consumers
-- true page-by-page progress emitted directly by the crawler
+- idempotent queue consumers and automatic recovery for abandoned queued jobs
+- true page-by-page progress callbacks emitted directly by the crawler
 - browser-level end-to-end tests
 - accessibility audit
 - richer redirect-chain reporting
@@ -135,7 +138,8 @@ Remaining:
 
 - D1 audit jobs
 - progress polling
-- retry endpoint
+- retry endpoint and UI
+- stale job detection
 - R2 report artifacts
 
 ### v0.8 beta — search evidence
