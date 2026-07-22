@@ -6,16 +6,11 @@ import {
   claimAuditJob,
   completeAuditJob,
   failAuditJob,
-  heartbeatAuditJob,
   updateAuditJobProgress,
 } from "./audit-job-db";
 
 function reportKeyFor(jobId: string): string {
   return `audit-reports/${jobId}.json`;
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 export async function runAuditJob(env: Env, ownerKey: string, jobId: string): Promise<void> {
@@ -24,27 +19,34 @@ export async function runAuditJob(env: Env, ownerKey: string, jobId: string): Pr
   if (!job) return;
 
   try {
-    await updateAuditJobProgress(env.DB, ownerKey, job.id, 0, job.maxPages);
+    await updateAuditJobProgress(env.DB, ownerKey, job.id, {
+      phase: "discovering",
+      currentUrl: job.rootUrl,
+      queuedUrls: 1,
+      pagesScanned: 0,
+      maxPages: job.maxPages,
+    });
+
     const previous = job.ownerEmail
       ? await getLatestComparableAudit(env.DB, job.ownerEmail, job.projectId, job.rootUrl)
       : null;
 
-    let settled = false;
-    let heartbeat = 5;
-    const auditPromise = auditSite(job.rootUrl, { maxPages: job.maxPages }).finally(() => {
-      settled = true;
+    await updateAuditJobProgress(env.DB, ownerKey, job.id, {
+      phase: "crawling",
+      currentUrl: job.rootUrl,
+      queuedUrls: 1,
+      pagesScanned: 0,
+      maxPages: job.maxPages,
     });
 
-    while (!settled) {
-      await Promise.race([auditPromise.then(() => undefined, () => undefined), sleep(800)]);
-      if (!settled) {
-        heartbeat = Math.min(90, heartbeat + 5);
-        await heartbeatAuditJob(env.DB, ownerKey, job.id, heartbeat);
-      }
-    }
+    const result = await auditSite(job.rootUrl, { maxPages: job.maxPages });
 
-    const result = await auditPromise;
-    await updateAuditJobProgress(env.DB, ownerKey, job.id, result.pagesScanned, job.maxPages);
+    await updateAuditJobProgress(env.DB, ownerKey, job.id, {
+      phase: "finalizing",
+      queuedUrls: 0,
+      pagesScanned: result.pagesScanned,
+      maxPages: job.maxPages,
+    });
 
     if (previous) result.comparison = compareAudits(result, previous);
     if (job.ownerEmail) await saveAudit(env.DB, job.ownerEmail, job.projectId, result);
