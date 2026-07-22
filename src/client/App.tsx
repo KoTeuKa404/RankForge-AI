@@ -35,6 +35,21 @@ function ScoreRing({ score }: { score: number }) {
   return <div className="score-ring" style={{ "--score": `${score * 3.6}deg` } as React.CSSProperties}><span>{score}</span><small>/100</small></div>;
 }
 
+function cleanEvidenceUrl(raw: string): string {
+  return raw.replace(/[),.;]+$/, "");
+}
+
+function affectedPagesForIssue(issue: SeoIssue, audit: AuditResult | null): PageAudit[] {
+  if (!audit) return [];
+  const urls = new Set<string>();
+  if (issue.url) urls.add(issue.url);
+  for (const match of issue.evidence?.match(/https?:\/\/[^\s<>"']+/g) || []) urls.add(cleanEvidenceUrl(match));
+  const matched = audit.pages.filter((page) => urls.has(page.url));
+  if (matched.length > 0) return matched.slice(0, 12);
+  const fallback = issue.url ? audit.pages.find((page) => page.url === issue.url) : undefined;
+  return fallback ? [fallback] : [];
+}
+
 function App() {
   const [identity, setIdentity] = useState<UserIdentity>({ authenticated: false });
   const [projects, setProjects] = useState<Project[]>([]);
@@ -135,15 +150,15 @@ function App() {
     setSelectedIssue(issue);
     setAiFix(null);
     setAiLoading(true);
-    const page = audit?.pages.find((candidate) => candidate.url === issue.url);
+    const pages = affectedPagesForIssue(issue, audit);
     try {
-      const result = await api.aiFix(issue, page);
+      const result = await api.aiFix(issue, pages);
       setAiFix(result.fix);
     } catch (error) {
       setAiFix({
         summary: "AI Fix is unavailable",
         whyItMatters: error instanceof Error ? error.message : "The request failed.",
-        implementation: "Add OPENAI_API_KEY in the Site hosted secrets and redeploy the approved version.",
+        implementation: "Configure OPENAI_API_KEY or GEMINI_API_KEY in hosted secrets, confirm /api/health reports ai: true, and retry.",
         verification: ["Check /api/health reports ai: true", "Retry this issue"],
       });
     } finally {
@@ -232,7 +247,7 @@ function App() {
 
             <section className="pages-section"><div className="section-bar"><div><div className="eyebrow">Crawl inventory</div><h3>Pages</h3></div></div><div className="table-wrap"><table><thead><tr><th>URL</th><th>Status</th><th>Title</th><th>Words</th><th>H1</th><th>Time</th></tr></thead><tbody>{audit.pages.map((page) => <tr key={page.url}><td><a href={page.url} target="_blank" rel="noreferrer">{page.url}</a></td><td><span className={`status-code ${page.status >= 400 ? "bad" : "good"}`}>{page.status}</span></td><td>{page.title || <em>Missing</em>}</td><td>{page.wordCount}</td><td>{page.h1.length}</td><td>{page.loadTimeMs} ms</td></tr>)}</tbody></table></div></section>
           </>}
-        </div> : workspace === "keywords" ? <KeywordWorkspace authenticated={identity.authenticated} selectedProject={selectedProject} projects={projects} onSelectProject={setSelectedProject} onCreateBrief={(analysisId, cluster) => { setBriefSeed({ analysisId, cluster }); setWorkspace("briefs"); }}/> : workspace === "links" ? <InternalLinkWorkspace authenticated={identity.authenticated} selectedProject={selectedProject} projects={projects} onSelectProject={setSelectedProject}/> : workspace === "briefs" ? <ContentBriefWorkspace authenticated={identity.authenticated} selectedProject={selectedProject} projects={projects} onSelectProject={setSelectedProject} seed={briefSeed} onSeedConsumed={() => setBriefSeed(null)}/> : <MonitoringWorkspace authenticated={identity.authenticated} projects={projects}/>}
+        </div> : workspace === "keywords" ? <KeywordWorkspace authenticated={identity.authenticated} selectedProject={selectedProject} projects={projects} onSelectProject={setSelectedProject} onCreateBrief={(analysisId, cluster) => { setBriefSeed({ analysisId, cluster }); setWorkspace("briefs"); }}/> : workspace === "links" ? <InternalLinkWorkspace authenticated={identity.authenticated} selectedProject={selectedProject} projects={projects} onSelectProject={setSelectedProject}/> : workspace === "briefs" ? <ContentBriefWorkspace authenticated={identity.authenticated} selectedProject={selectedProject} projects={projects} onSelectProject={setSelectedProject} seed={briefSeed} onSeedConsumed={() => setBriefSeed(null)}/> : <MonitoringWorkspace authenticated={identity.authenticated} projects={projects}/>} 
       </section>
 
       {workspace === "audit" && <section id="history" className="history-section">
@@ -243,7 +258,7 @@ function App() {
 
     <footer><span>RankForge AI v0.6</span><span>Built for transparent, standards-compliant SEO operations.</span></footer>
 
-    {selectedIssue && <div className="modal-backdrop" onMouseDown={(event) => { if (event.currentTarget === event.target) setSelectedIssue(null); }}><section className="modal" role="dialog" aria-modal="true" aria-labelledby="ai-fix-title"><button className="modal-close" onClick={() => setSelectedIssue(null)} aria-label="Close">×</button><div className="eyebrow">AI remediation</div><h2 id="ai-fix-title">{selectedIssue.title}</h2>{aiLoading ? <div className="ai-loading"><i className="spinner"/> Generating an implementation-ready fix…</div> : aiFix && <div className="fix-content"><h4>Summary</h4><p>{aiFix.summary}</p><h4>Why it matters</h4><p>{aiFix.whyItMatters}</p><h4>Implementation</h4><p>{aiFix.implementation}</p>{aiFix.code && <><h4>Suggested code</h4><pre>{aiFix.code}</pre></>}<h4>Verify</h4><ol>{aiFix.verification.map((step, index) => <li key={index}>{step}</li>)}</ol></div>}</section></div>}
+    {selectedIssue && <div className="modal-backdrop" onMouseDown={(event) => { if (event.currentTarget === event.target) setSelectedIssue(null); }}><section className="modal" role="dialog" aria-modal="true" aria-labelledby="ai-fix-title"><button className="modal-close" onClick={() => setSelectedIssue(null)} aria-label="Close">×</button><div className="eyebrow">AI remediation</div><h2 id="ai-fix-title">{selectedIssue.title}</h2>{aiLoading ? <div className="ai-loading"><i className="spinner"/> Generating an implementation-ready fix…</div> : aiFix && <div className="fix-content">{aiFix.provider && <div className="provider-pill">Generated by {aiFix.provider === "gemini" ? "Gemini" : "OpenAI"}</div>}<h4>Summary</h4><p>{aiFix.summary}</p><h4>Why it matters</h4><p>{aiFix.whyItMatters}</p><h4>Implementation</h4><p>{aiFix.implementation}</p>{aiFix.code && <><h4>Suggested code</h4><pre>{aiFix.code}</pre></>}<h4>Verify</h4><ol>{aiFix.verification.map((step, index) => <li key={index}>{step}</li>)}</ol></div>}</section></div>}
 
     {newProjectOpen && <div className="modal-backdrop" onMouseDown={(event) => { if (event.currentTarget === event.target) setNewProjectOpen(false); }}><section className="modal small" role="dialog" aria-modal="true"><button className="modal-close" onClick={() => setNewProjectOpen(false)}>×</button><div className="eyebrow">Workspace</div><h2>Create project</h2><label className="modal-field"><span>Name</span><input value={projectName} onChange={(event) => setProjectName(event.target.value)} placeholder="My SEO project" maxLength={80}/></label><label className="modal-field"><span>Root URL</span><input value={url} onChange={(event) => setUrl(event.target.value)} inputMode="url"/></label><button className="button primary full" onClick={createProject}>Create project</button></section></div>}
   </div>;
