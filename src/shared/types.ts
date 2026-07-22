@@ -251,6 +251,8 @@ export interface InternalLinkAnalysis {
   underlinkedPages: string[];
   suggestions: InternalLinkSuggestion[];
   skippedTargets: string[];
+  semanticEnhanced?: boolean;
+  semanticModel?: string;
 }
 
 export interface InternalLinkAnalysisSummary {
