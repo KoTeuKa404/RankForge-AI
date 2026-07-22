@@ -13,6 +13,7 @@ export interface Env {
   OPENAI_MODEL?: string;
   GEMINI_API_KEY?: string;
   GEMINI_MODEL?: string;
+  GEMINI_EMBEDDING_MODEL?: string;
   GSC_CLIENT_ID?: string;
   GSC_CLIENT_SECRET?: string;
   GSC_TOKEN_SECRET?: string;
