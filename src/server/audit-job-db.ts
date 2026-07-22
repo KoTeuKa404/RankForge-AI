@@ -25,6 +25,7 @@ export interface StoredAuditJob extends AuditJob {
   ownerKey: string;
   ownerEmail: string | null;
   projectId: string | null;
+  toJSON(): AuditJob;
 }
 
 function parseResult(raw: string | null): AuditResult | undefined {
@@ -36,8 +37,28 @@ function parseResult(raw: string | null): AuditResult | undefined {
   }
 }
 
-function fromRow(row: AuditJobRow): StoredAuditJob {
+function publicJob(job: StoredAuditJob): AuditJob {
   return {
+    id: job.id,
+    rootUrl: job.rootUrl,
+    maxPages: job.maxPages,
+    status: job.status,
+    progress: job.progress,
+    pagesScanned: job.pagesScanned,
+    attempts: job.attempts,
+    auditId: job.auditId,
+    reportKey: job.reportKey,
+    error: job.error,
+    createdAt: job.createdAt,
+    updatedAt: job.updatedAt,
+    startedAt: job.startedAt,
+    finishedAt: job.finishedAt,
+    audit: job.audit,
+  };
+}
+
+function fromRow(row: AuditJobRow): StoredAuditJob {
+  const job = {
     id: row.id,
     ownerKey: row.owner_key,
     ownerEmail: row.owner_email,
@@ -56,7 +77,9 @@ function fromRow(row: AuditJobRow): StoredAuditJob {
     startedAt: row.started_at || undefined,
     finishedAt: row.finished_at || undefined,
     audit: parseResult(row.result_json),
-  };
+    toJSON(): AuditJob { return publicJob(this); },
+  } satisfies StoredAuditJob;
+  return job;
 }
 
 const JOB_COLUMNS = `id, owner_key, owner_email, project_id, root_url, max_pages, status,
@@ -80,20 +103,21 @@ export async function createAuditJob(
   },
 ): Promise<StoredAuditJob> {
   const now = new Date().toISOString();
-  const job: StoredAuditJob = {
+  const job = {
     id: crypto.randomUUID(),
     ownerKey: input.ownerKey,
     ownerEmail: input.ownerEmail,
     projectId: input.projectId,
     rootUrl: input.rootUrl,
     maxPages: input.maxPages,
-    status: "queued",
+    status: "queued" as const,
     progress: 0,
     pagesScanned: 0,
     attempts: 0,
     createdAt: now,
     updatedAt: now,
-  };
+    toJSON(): AuditJob { return publicJob(this); },
+  } satisfies StoredAuditJob;
 
   await db.prepare(
     `INSERT INTO audit_jobs
@@ -155,17 +179,12 @@ export async function heartbeatAuditJob(
   id: string,
   progress: number,
 ): Promise<void> {
+  const safeProgress = Math.max(5, Math.min(90, progress));
   await db.prepare(
     `UPDATE audit_jobs
      SET progress = CASE WHEN progress < ? THEN ? ELSE progress END, updated_at = ?
      WHERE id = ? AND owner_key = ? AND status = 'running'`,
-  ).bind(
-    Math.max(5, Math.min(90, progress)),
-    Math.max(5, Math.min(90, progress)),
-    new Date().toISOString(),
-    id,
-    ownerKey,
-  ).run();
+  ).bind(safeProgress, safeProgress, new Date().toISOString(), id, ownerKey).run();
 }
 
 export async function completeAuditJob(
