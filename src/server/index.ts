@@ -15,6 +15,8 @@ import { runMonitor } from "./monitor-runner";
 import { getInternalLinkAnalysis, listInternalLinkAnalyses, saveInternalLinkAnalysis } from "./internal-link-db";
 import { getContentBrief, listContentBriefs, saveContentBrief, updateContentBrief } from "./content-brief-db";
 import { getKeywordAnalysis, listKeywordAnalyses, saveKeywordAnalysis } from "./keyword-db";
+import { createAuditJob, getAuditJob, resetAuditJob } from "./audit-job-db";
+import { runAuditJob } from "./audit-job-runner";
 
 const SECURITY_HEADERS = {
   "content-security-policy": "default-src 'self'; img-src 'self' data: https:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' https://api.openai.com; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
@@ -63,6 +65,10 @@ function cleanName(value: unknown): string {
   return name;
 }
 
+function runInBackground(context: ExecutionContext | undefined, task: Promise<void>): void {
+  if (context) context.waitUntil(task);
+  else void task;
+}
 
 async function validSystemToken(request: Request, expected?: string): Promise<boolean> {
   if (!expected || expected.length < 24) return false;
@@ -81,13 +87,13 @@ async function validSystemToken(request: Request, expected?: string): Promise<bo
   return mismatch === 0;
 }
 
-async function handleApi(request: Request, env: Env): Promise<Response> {
+async function handleApi(request: Request, env: Env, context?: ExecutionContext): Promise<Response> {
   const url = new URL(request.url);
   const path = url.pathname;
   const identity = getIdentity(request, env);
 
   if (request.method === "GET" && path === "/api/health") {
-    return json({ ok: true, version: "0.6.0", database: Boolean(env.DB), ai: Boolean(env.OPENAI_API_KEY) });
+    return json({ ok: true, version: "0.7.0-beta", database: Boolean(env.DB), ai: Boolean(env.OPENAI_API_KEY || env.GEMINI_API_KEY), asyncAudits: Boolean(env.DB), reportStorage: Boolean(env.FILES) });
   }
 
   if (request.method === "GET" && path === "/api/me") {
@@ -109,6 +115,71 @@ async function handleApi(request: Request, env: Env): Promise<Response> {
     const name = cleanName(body.name);
     const rootUrl = normalizeTargetUrl(String(body.rootUrl || "")).toString();
     return json({ project: await createProject(env.DB, identity.email, name, rootUrl) }, 201);
+  }
+
+  if (request.method === "POST" && path === "/api/audit-jobs") {
+    if (!env.DB) return json({ error: "D1 database is required for asynchronous audits." }, 503);
+    const ownerKey = await requestKey(request, env);
+    const allowed = await consumeRateLimit(env.DB, `audit-job:${ownerKey}`, identity ? 20 : 5, 3_600);
+    if (!allowed) return json({ error: "Audit rate limit reached. Try again later." }, 429, { "retry-after": "3600" });
+
+    const body = await parseJsonBody<{ url?: unknown; maxPages?: unknown; projectId?: unknown }>(request);
+    const rootUrl = normalizeTargetUrl(String(body.url || "")).toString();
+    const requestedPages = Number(body.maxPages || 10);
+    const maxPages = [5, 10, 25].includes(requestedPages) ? requestedPages : 10;
+    const projectId = typeof body.projectId === "string" && body.projectId ? body.projectId : null;
+
+    if (projectId) {
+      if (!identity) return json({ error: "Sign in to save audits to a project." }, 401);
+      if (!(await userOwnsProject(env.DB, identity.email, projectId))) return json({ error: "Project not found." }, 404);
+    }
+
+    const job = await createAuditJob(env.DB, {
+      ownerKey,
+      ownerEmail: identity?.email || null,
+      projectId,
+      rootUrl,
+      maxPages,
+    });
+    runInBackground(context, runAuditJob(env, ownerKey, job.id));
+    return json({ job }, 202, { location: `/api/audit-jobs/${job.id}` });
+  }
+
+  const auditJobMatch = path.match(/^\/api\/audit-jobs\/([0-9a-f-]+)$/i);
+  if (request.method === "GET" && auditJobMatch) {
+    if (!env.DB) return json({ error: "D1 database is not configured." }, 503);
+    const ownerKey = await requestKey(request, env);
+    const job = await getAuditJob(env.DB, ownerKey, auditJobMatch[1]);
+    return job ? json({ job }) : json({ error: "Audit job not found." }, 404);
+  }
+
+  const auditJobRetryMatch = path.match(/^\/api\/audit-jobs\/([0-9a-f-]+)\/retry$/i);
+  if (request.method === "POST" && auditJobRetryMatch) {
+    if (!env.DB) return json({ error: "D1 database is not configured." }, 503);
+    const ownerKey = await requestKey(request, env);
+    const reset = await resetAuditJob(env.DB, ownerKey, auditJobRetryMatch[1]);
+    if (!reset) return json({ error: "Only failed jobs with fewer than three attempts can be retried." }, 409);
+    runInBackground(context, runAuditJob(env, ownerKey, auditJobRetryMatch[1]));
+    const job = await getAuditJob(env.DB, ownerKey, auditJobRetryMatch[1]);
+    return json({ job }, 202);
+  }
+
+  const auditJobReportMatch = path.match(/^\/api\/audit-jobs\/([0-9a-f-]+)\/report$/i);
+  if (request.method === "GET" && auditJobReportMatch) {
+    if (!env.DB || !env.FILES) return json({ error: "Report storage is not configured." }, 503);
+    const ownerKey = await requestKey(request, env);
+    const job = await getAuditJob(env.DB, ownerKey, auditJobReportMatch[1]);
+    if (!job?.reportKey) return json({ error: "Stored report not found." }, 404);
+    const object = await env.FILES.get(job.reportKey);
+    if (!object) return json({ error: "Stored report not found." }, 404);
+    return new Response(object.body, {
+      headers: {
+        ...SECURITY_HEADERS,
+        "content-type": object.httpMetadata?.contentType || "application/json; charset=utf-8",
+        "content-disposition": `attachment; filename="rankforge-${job.id}.json"`,
+        "cache-control": "private, no-store",
+      },
+    });
   }
 
   if (request.method === "GET" && path === "/api/audits") {
@@ -187,9 +258,6 @@ async function handleApi(request: Request, env: Env): Promise<Response> {
     if (identity && env.DB) await saveKeywordAnalysis(env.DB, identity.email, analysis);
     return json({ analysis }, 201);
   }
-
-
-
 
   if (request.method === "POST" && path === "/api/system/run-monitors") {
     if (!env.DB) return json({ error: "D1 database is not configured." }, 503);
@@ -354,7 +422,7 @@ async function handleApi(request: Request, env: Env): Promise<Response> {
     const allowed = await consumeRateLimit(env.DB, `ai:${key}`, identity ? 30 : 3, 3_600);
     if (!allowed) return json({ error: "AI generation rate limit reached. Try again later." }, 429, { "retry-after": "3600" });
 
-    const body = await parseJsonBody<{ issue?: SeoIssue; page?: PageAudit }>(request, 40_000);
+    const body = await parseJsonBody<{ issue?: SeoIssue; page?: PageAudit | PageAudit[] }>(request, 40_000);
     if (!body.issue || typeof body.issue !== "object") throw new TargetValidationError("A valid issue is required.");
     const fix = await generateAiFix(env, body.issue, body.page, key);
     return json({ fix });
@@ -364,10 +432,10 @@ async function handleApi(request: Request, env: Env): Promise<Response> {
 }
 
 export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
+  async fetch(request: Request, env: Env, context?: ExecutionContext): Promise<Response> {
     try {
       const url = new URL(request.url);
-      if (url.pathname.startsWith("/api/")) return await handleApi(request, env);
+      if (url.pathname.startsWith("/api/")) return await handleApi(request, env, context);
       if (env.ASSETS) {
         const response = await env.ASSETS.fetch(request);
         const headers = new Headers(response.headers);
