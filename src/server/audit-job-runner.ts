@@ -9,7 +9,7 @@ import {
   updateAuditJobProgress,
 } from "./audit-job-db";
 
-async function reportKeyFor(jobId: string): Promise<string> {
+function reportKeyFor(jobId: string): string {
   return `audit-reports/${jobId}.json`;
 }
 
@@ -19,23 +19,20 @@ export async function runAuditJob(env: Env, ownerKey: string, jobId: string): Pr
   if (!job) return;
 
   try {
+    await updateAuditJobProgress(env.DB, ownerKey, job.id, 0, job.maxPages);
     const previous = job.ownerEmail
       ? await getLatestComparableAudit(env.DB, job.ownerEmail, job.projectId, job.rootUrl)
       : null;
 
-    const result = await auditSite(job.rootUrl, {
-      maxPages: job.maxPages,
-      onProgress: async ({ pagesScanned }) => {
-        await updateAuditJobProgress(env.DB!, ownerKey, job.id, pagesScanned, job.maxPages);
-      },
-    });
+    const result = await auditSite(job.rootUrl, { maxPages: job.maxPages });
+    await updateAuditJobProgress(env.DB, ownerKey, job.id, result.pagesScanned, job.maxPages);
 
     if (previous) result.comparison = compareAudits(result, previous);
     if (job.ownerEmail) await saveAudit(env.DB, job.ownerEmail, job.projectId, result);
 
     let reportKey: string | undefined;
     if (env.FILES) {
-      reportKey = await reportKeyFor(job.id);
+      reportKey = reportKeyFor(job.id);
       await env.FILES.put(reportKey, JSON.stringify(result, null, 2), {
         httpMetadata: { contentType: "application/json; charset=utf-8" },
         customMetadata: {
