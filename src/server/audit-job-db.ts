@@ -63,6 +63,12 @@ const JOB_COLUMNS = `id, owner_key, owner_email, project_id, root_url, max_pages
   progress, pages_scanned, attempts, audit_id, report_key, result_json, error,
   created_at, updated_at, started_at, finished_at`;
 
+export function calculateAuditJobProgress(pagesScanned: number, maxPages: number): number {
+  const safePages = Math.max(0, pagesScanned);
+  const safeMax = Math.max(1, maxPages);
+  return Math.max(5, Math.min(95, Math.round((safePages / safeMax) * 90) + 5));
+}
+
 export async function createAuditJob(
   db: D1Database,
   input: {
@@ -135,12 +141,12 @@ export async function updateAuditJobProgress(
   pagesScanned: number,
   maxPages: number,
 ): Promise<void> {
-  const progress = Math.max(1, Math.min(95, Math.round((pagesScanned / Math.max(1, maxPages)) * 90) + 5));
+  const progress = calculateAuditJobProgress(pagesScanned, maxPages);
   await db.prepare(
     `UPDATE audit_jobs
      SET pages_scanned = ?, progress = ?, updated_at = ?
      WHERE id = ? AND owner_key = ? AND status = 'running'`,
-  ).bind(pagesScanned, progress, new Date().toISOString(), id, ownerKey).run();
+  ).bind(Math.max(0, pagesScanned), progress, new Date().toISOString(), id, ownerKey).run();
 }
 
 export async function completeAuditJob(
