@@ -1,8 +1,8 @@
 {
   "name": "rankforge-ai",
-  "version": "0.7.0-beta.0",
+  "version": "1.0.0-rc.1",
   "private": true,
-  "description": "AI-driven technical SEO audit command center for ChatGPT Sites",
+  "description": "AI-driven technical SEO and SearchOps command center for ChatGPT Sites and Cloudflare Workers",
   "type": "module",
   "scripts": {
     "dev": "npm run build && concurrently -k -n web,api \"npm:dev:web\" \"npm:dev:api\"",
@@ -11,23 +11,33 @@
     "dev:api": "wrangler dev --port 8787",
     "build": "tsc --noEmit && vite build",
     "test": "vitest run",
+    "release:check": "node scripts/release-check.mjs",
+    "smoke": "node scripts/smoke.mjs",
     "audit:prod": "npm audit --omit=dev --audit-level=high",
     "audit:all": "npm audit --audit-level=high",
-    "check": "npm run build && npm run test && npm run audit:prod",
+    "check": "npm run build && npm run test && npm run release:check && npm run audit:prod",
+    "release:verify": "npm run check && npm run smoke",
     "db:migrate:local": "wrangler d1 migrations apply rankforge-ai --local",
     "db:migrate:remote": "wrangler d1 migrations apply rankforge-ai --remote",
-    "deploy:cloudflare": "npm run build && wrangler deploy"
+    "deploy:cloudflare": "npm run check && wrangler deploy"
   },
   "keywords": [
     "seo",
+    "searchops",
+    "search-console",
     "audit",
     "ai",
     "chatgpt-sites",
+    "cloudflare-workers",
     "d1",
+    "r2",
     "typescript"
   ],
   "author": "KoTeuKa404",
   "license": "MIT",
+  "engines": {
+    "node": ">=22.0.0"
+  },
   "dependencies": {
     "node-html-parser": "^9.0.0",
     "react": "^19.2.8",
