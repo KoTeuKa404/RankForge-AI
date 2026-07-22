@@ -52,6 +52,6 @@ export default function SearchConsolePage() {
         />
       </section>
     </main>
-    <footer><span>RankForge AI v0.8 beta</span><span>Search Console data stays scoped to the authenticated project.</span></footer>
+    <footer><span>RankForge AI v1.0 RC</span><span>Search Console data stays scoped to the authenticated project.</span></footer>
   </div>;
 }
