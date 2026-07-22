@@ -59,7 +59,7 @@ async function waitForAuditJob(
   onProgress?.(job);
 
   while (job.status === "queued" || job.status === "running") {
-    if (Date.now() > deadline) throw new Error("The audit is still running. Reopen the job or retry shortly.");
+    if (Date.now() > deadline) throw new Error("The audit is still running. Keep the job ID and check it again shortly.");
     await sleep(600);
     const response = await request<{ job: AuditJob }>(`/api/audit-jobs/${encodeURIComponent(job.id)}`);
     job = response.job;
@@ -85,6 +85,7 @@ export const api = {
   }),
   auditJob: (id: string) => request<{ job: AuditJob }>(`/api/audit-jobs/${encodeURIComponent(id)}`),
   retryAuditJob: (id: string) => request<{ job: AuditJob }>(`/api/audit-jobs/${encodeURIComponent(id)}/retry`, { method: "POST" }),
+  waitAuditJob: async (job: AuditJob, onProgress?: (value: AuditJob) => void) => ({ audit: await waitForAuditJob(job, onProgress) }),
   audit: async (url: string, maxPages: number, projectId?: string, onProgress?: (job: AuditJob) => void) => {
     const started = await request<{ job: AuditJob }>("/api/audit-jobs", {
       method: "POST",
