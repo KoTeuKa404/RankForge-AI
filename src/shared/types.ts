@@ -68,12 +68,16 @@ export interface AuditResult {
 }
 
 export type AuditJobStatus = "queued" | "running" | "completed" | "failed";
+export type AuditJobPhase = "discovering" | "crawling" | "finalizing";
 
 export interface AuditJob {
   id: string;
   rootUrl: string;
   maxPages: number;
   status: AuditJobStatus;
+  phase?: AuditJobPhase;
+  currentUrl?: string;
+  queuedUrls: number;
   progress: number;
   pagesScanned: number;
   attempts: number;
