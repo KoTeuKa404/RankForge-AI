@@ -36,13 +36,35 @@ The Vite frontend proxies `/api` to the local Worker on `http://127.0.0.1:8787`.
 
 This allows projects, histories, briefs, links, and monitoring to be tested locally without weakening production authentication.
 
-## AI Fix
+## AI Fix providers
 
-AI Fix is optional. To enable it locally, place your key only in `.dev.vars`:
+AI Fix is optional and supports OpenAI, Gemini, or automatic fallback. Keep all keys only in `.dev.vars` or hosted secrets.
+
+### Gemini only
 
 ```dotenv
-OPENAI_API_KEY=your_key
+AI_PROVIDER=gemini
+GEMINI_API_KEY=your_gemini_key
+GEMINI_MODEL=gemini-3.5-flash
 ```
+
+### OpenAI only
+
+```dotenv
+AI_PROVIDER=openai
+OPENAI_API_KEY=your_openai_key
+OPENAI_MODEL=gpt-5
+```
+
+### Automatic fallback
+
+```dotenv
+AI_PROVIDER=auto
+OPENAI_API_KEY=your_openai_key
+GEMINI_API_KEY=your_gemini_key
+```
+
+In `auto` mode, RankForge tries OpenAI first when both keys exist and falls back to Gemini when the OpenAI request fails. When only one key exists, that provider is used automatically.
 
 Never commit `.dev.vars`.
 
