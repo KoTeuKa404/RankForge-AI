@@ -1,5 +1,6 @@
 import app from "./index";
-import { getAiProviderStatus } from "./ai";
+import { generateAiFix, getAiProviderStatus } from "./ai";
+import { evaluateAiFix } from "./ai-evaluation";
 import { createAuditJob, getAuditJob, resetAuditJob } from "./audit-job-db";
 import { consumeRateLimit, getAudit, userOwnsProject } from "./db";
 import type { AuditQueueMessage, Env } from "./env";
@@ -9,6 +10,7 @@ import { saveInternalLinkAnalysis } from "./internal-link-db";
 import { consumeAuditQueue, enqueueAuditJob, runScheduledMaintenance } from "./job-scheduler";
 import { analyzeInternalLinksSemantic } from "./semantic-links";
 import { normalizeTargetUrl, TargetValidationError } from "./security";
+import type { PageAudit, SeoIssue } from "../shared/types";
 import { assertAndIncrementUsage, readUsage } from "./usage";
 
 const HEALTH_HEADERS = {
@@ -114,6 +116,29 @@ async function handleSemanticLinks(request: Request, env: Env): Promise<Response
   return json({ analysis }, 201);
 }
 
+async function handleAiFix(request: Request, env: Env): Promise<Response | null> {
+  const url = new URL(request.url);
+  if (request.method !== "POST" || url.pathname !== "/api/ai-fix") return null;
+  const ownerKey = await requestKey(request, env);
+  if (env.DB) await assertAndIncrementUsage(env.DB, env, ownerKey, "ai_fixes", 1);
+  const raw = await request.text();
+  if (raw.length > 40_000) throw new TargetValidationError("Request body is too large.");
+  let body: { issue?: SeoIssue; page?: PageAudit | PageAudit[] };
+  try {
+    body = JSON.parse(raw) as typeof body;
+  } catch {
+    throw new TargetValidationError("Request body must be valid JSON.");
+  }
+  if (!body.issue || typeof body.issue !== "object") throw new TargetValidationError("A valid issue is required.");
+  const fix = await generateAiFix(env, body.issue, body.page, ownerKey);
+  const evaluation = evaluateAiFix(fix, body.issue);
+  if (!evaluation.passed) {
+    console.warn("ai_fix_rejected", { score: evaluation.score, warnings: evaluation.warnings });
+    return json({ error: "The AI response failed RankForge quality checks. Retry generation.", evaluation }, 502);
+  }
+  return json({ fix: { ...fix, qualityScore: evaluation.score, qualityWarnings: evaluation.warnings } });
+}
+
 export default {
   async fetch(request: Request, env: Env, context: ExecutionContext): Promise<Response> {
     try {
@@ -122,7 +147,7 @@ export default {
         const provider = getAiProviderStatus(env);
         return json({
           ok: true,
-          version: "0.9.0-rc.1",
+          version: "1.0.0-rc.1",
           database: Boolean(env.DB),
           asyncAudits: Boolean(env.DB),
           durableQueue: Boolean(env.AUDIT_QUEUE),
@@ -130,6 +155,7 @@ export default {
           searchConsole: Boolean(env.GSC_CLIENT_ID && env.GSC_CLIENT_SECRET && env.GSC_TOKEN_SECRET),
           semanticLinks: Boolean(env.GEMINI_API_KEY),
           dnsPreflight: true,
+          aiQualityGate: true,
           ai: provider.enabled,
           aiProvider: provider.preferred,
           aiMode: provider.mode,
@@ -148,6 +174,8 @@ export default {
       if (auditRetry) return auditRetry;
       const semanticLinks = await handleSemanticLinks(request, env);
       if (semanticLinks) return semanticLinks;
+      const aiFix = await handleAiFix(request, env);
+      if (aiFix) return aiFix;
 
       if (url.pathname.startsWith("/api/gsc/")) {
         if (request.method === "POST" && url.pathname === "/api/gsc/sync" && env.DB) {
@@ -155,10 +183,6 @@ export default {
         }
         const response = await handleSearchConsoleRequest(request, env);
         if (response) return response;
-      }
-
-      if (request.method === "POST" && url.pathname === "/api/ai-fix" && env.DB) {
-        await assertAndIncrementUsage(env.DB, env, await requestKey(request, env), "ai_fixes", 1);
       }
 
       return app.fetch(request, env, context);
