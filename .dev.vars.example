@@ -11,6 +11,14 @@ OPENAI_MODEL=gpt-5
 GEMINI_API_KEY=
 GEMINI_MODEL=gemini-3.5-flash
 
+# Google Search Console OAuth. Create a Google OAuth Web application and enable
+# the Search Console API. Register this local redirect URI exactly:
+# http://localhost:8787/api/gsc/callback
+GSC_CLIENT_ID=
+GSC_CLIENT_SECRET=
+GSC_TOKEN_SECRET=replace_with_at_least_32_random_characters
+GSC_REDIRECT_URI=http://localhost:8787/api/gsc/callback
+
 # Use at least 32 random characters before testing the protected scheduler endpoint.
 MONITOR_TOKEN=replace_with_at_least_32_random_characters
 
@@ -18,3 +26,9 @@ MONITOR_TOKEN=replace_with_at_least_32_random_characters
 # while ENVIRONMENT=development.
 DEV_USER_EMAIL=developer@localhost
 ENVIRONMENT=development
+
+# Monthly safety/cost limits. Hosted deployments may override these values.
+MONTHLY_AUDIT_LIMIT=100
+MONTHLY_AI_FIX_LIMIT=250
+MONTHLY_GSC_SYNC_LIMIT=40
+MONTHLY_PAGE_LIMIT=2500
