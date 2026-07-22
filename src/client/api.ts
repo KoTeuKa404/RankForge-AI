@@ -19,6 +19,12 @@ import type {
   SeoIssue,
   UserIdentity,
 } from "../shared/types";
+import type {
+  SearchConsoleConnectionStatus,
+  SearchConsoleProperty,
+  SearchConsoleSnapshot,
+  UsageSummary,
+} from "../shared/search-console";
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const response = await fetch(path, {
@@ -73,6 +79,7 @@ async function waitForAuditJob(
 
 export const api = {
   me: () => request<UserIdentity>("/api/me"),
+  usage: () => request<{ usage: UsageSummary }>("/api/usage"),
   projects: () => request<{ projects: Project[] }>("/api/projects"),
   createProject: (name: string, rootUrl: string) => request<{ project: Project }>("/api/projects", {
     method: "POST",
@@ -132,4 +139,20 @@ export const api = {
   runMonitor: (id: string) => request<MonitorRunResult>(`/api/monitors/${encodeURIComponent(id)}/run`, { method: "POST" }),
   monitoringAlerts: () => request<{ alerts: MonitoringAlert[] }>("/api/monitoring-alerts"),
   readMonitoringAlert: (id: string) => request<{ ok: true }>(`/api/monitoring-alerts/${encodeURIComponent(id)}/read`, { method: "POST" }),
+  gscStatus: (projectId: string) => request<{ status: SearchConsoleConnectionStatus }>(`/api/gsc/status?projectId=${encodeURIComponent(projectId)}`),
+  gscConnect: (projectId: string) => request<{ authorizationUrl: string }>("/api/gsc/connect", {
+    method: "POST",
+    body: JSON.stringify({ projectId }),
+  }),
+  gscProperties: (projectId: string) => request<{ properties: SearchConsoleProperty[] }>(`/api/gsc/properties?projectId=${encodeURIComponent(projectId)}`),
+  gscSelectProperty: (projectId: string, siteUrl: string) => request<{ ok: true; siteUrl: string }>("/api/gsc/select-property", {
+    method: "POST",
+    body: JSON.stringify({ projectId, siteUrl }),
+  }),
+  gscSync: (projectId: string, days: 7 | 28 | 90) => request<{ snapshot: SearchConsoleSnapshot }>("/api/gsc/sync", {
+    method: "POST",
+    body: JSON.stringify({ projectId, days }),
+  }),
+  gscSnapshots: (projectId: string) => request<{ snapshots: SearchConsoleSnapshot[] }>(`/api/gsc/snapshots?projectId=${encodeURIComponent(projectId)}`),
+  gscDisconnect: (projectId: string) => request<{ ok: boolean }>(`/api/gsc/connection?projectId=${encodeURIComponent(projectId)}`, { method: "DELETE" }),
 };
