@@ -6,6 +6,9 @@
   "compatibility_flags": [
     "nodejs_compat"
   ],
+  "limits": {
+    "cpu_ms": 300000
+  },
   "assets": {
     "directory": "./dist",
     "binding": "ASSETS",
@@ -25,11 +28,37 @@
       "bucket_name": "rankforge-ai-files"
     }
   ],
+  "queues": {
+    "producers": [
+      {
+        "binding": "AUDIT_QUEUE",
+        "queue": "rankforge-audit-jobs"
+      }
+    ],
+    "consumers": [
+      {
+        "queue": "rankforge-audit-jobs",
+        "max_batch_size": 1,
+        "max_batch_timeout": 5,
+        "max_retries": 3,
+        "retry_delay": 30,
+        "dead_letter_queue": "rankforge-audit-jobs-dlq",
+        "max_concurrency": 3
+      }
+    ]
+  },
+  "triggers": {
+    "crons": ["*/5 * * * *"]
+  },
   "vars": {
     "ENVIRONMENT": "development",
     "AI_PROVIDER": "auto",
     "OPENAI_MODEL": "gpt-5",
     "GEMINI_MODEL": "gemini-3.5-flash",
-    "DEV_USER_EMAIL": "developer@localhost"
+    "DEV_USER_EMAIL": "developer@localhost",
+    "MONTHLY_AUDIT_LIMIT": "100",
+    "MONTHLY_AI_FIX_LIMIT": "250",
+    "MONTHLY_GSC_SYNC_LIMIT": "40",
+    "MONTHLY_PAGE_LIMIT": "2500"
   }
 }
