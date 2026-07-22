@@ -9,8 +9,10 @@
     "dev:web": "vite --host 0.0.0.0 --port 5173",
     "dev:api": "wrangler dev --port 8787",
     "build": "tsc --noEmit && vite build",
-    "check": "npm run build && npm run test && npm audit --audit-level=high",
     "test": "vitest run",
+    "audit:prod": "npm audit --omit=dev --audit-level=high",
+    "audit:all": "npm audit --audit-level=high",
+    "check": "npm run build && npm run test && npm run audit:prod",
     "db:migrate:local": "wrangler d1 migrations apply rankforge-ai --local",
     "db:migrate:remote": "wrangler d1 migrations apply rankforge-ai --remote",
     "deploy:cloudflare": "npm run build && wrangler deploy"
