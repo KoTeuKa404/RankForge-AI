@@ -1,0 +1,29 @@
+.job-progress {
+  width: min(560px, 90%);
+  height: 10px;
+  margin: 18px auto 10px;
+  overflow: hidden;
+  border: 1px solid rgba(111, 231, 213, 0.22);
+  border-radius: 999px;
+  background: rgba(7, 15, 28, 0.8);
+}
+
+.job-progress > span {
+  display: block;
+  min-width: 2%;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #54dfcf, #78a8ff, #8d72ff);
+  box-shadow: 0 0 18px rgba(84, 223, 207, 0.35);
+  transition: width 300ms ease;
+}
+
+.loading-state > small {
+  display: block;
+  color: #8290a8;
+  text-align: center;
+}
+
+.summary-actions a.button {
+  text-decoration: none;
+}
