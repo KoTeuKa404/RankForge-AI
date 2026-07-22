@@ -4,6 +4,7 @@ import App from "./App";
 import SearchConsolePage from "./SearchConsolePage";
 import "./styles.css";
 import "./async-jobs.css";
+import "./search-console.css";
 
 const workspace = new URLSearchParams(window.location.search).get("workspace");
 const content = workspace === "search"
