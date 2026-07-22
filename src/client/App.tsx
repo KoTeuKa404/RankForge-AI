@@ -5,7 +5,7 @@ import KeywordWorkspace from "./KeywordWorkspace";
 import ContentBriefWorkspace, { type BriefSeed } from "./ContentBriefWorkspace";
 import InternalLinkWorkspace from "./InternalLinkWorkspace";
 import MonitoringWorkspace from "./MonitoringWorkspace";
-import type { AiFix, AuditResult, AuditSummary, PageAudit, Project, SeoIssue, Severity, UserIdentity } from "../shared/types";
+import type { AiFix, AuditJob, AuditResult, AuditSummary, PageAudit, Project, SeoIssue, Severity, UserIdentity } from "../shared/types";
 
 type Filter = "all" | Severity;
 
@@ -58,6 +58,7 @@ function App() {
   const [url, setUrl] = useState("https://example.com");
   const [maxPages, setMaxPages] = useState(10);
   const [audit, setAudit] = useState<AuditResult | null>(null);
+  const [auditJob, setAuditJob] = useState<AuditJob | null>(null);
   const [filter, setFilter] = useState<Filter>("all");
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
@@ -103,9 +104,10 @@ function App() {
     setLoading(true);
     setMessage("");
     setAudit(null);
+    setAuditJob(null);
     setSelectedIssue(null);
     try {
-      const result = await api.audit(url, maxPages, selectedProject || undefined);
+      const result = await api.audit(url, maxPages, selectedProject || undefined, setAuditJob);
       setAudit(result.audit);
       setUrl(result.audit.rootUrl);
       if (identity.authenticated) {
@@ -180,7 +182,7 @@ function App() {
         <div className="eyebrow">Technical SEO command center</div>
         <h1>Find what blocks growth.<br/><span>Ship the fix.</span></h1>
         <p>Run a security-bounded crawl, prioritize technical issues, and turn findings into implementation-ready AI recommendations.</p>
-        <div className="trust-row"><span>✓ Real crawl</span><span>✓ Up to 25 pages</span><span>✓ D1 history</span><span>✓ AI-assisted fixes</span></div>
+        <div className="trust-row"><span>✓ Async crawl jobs</span><span>✓ Up to 25 pages</span><span>✓ D1 history</span><span>✓ R2 reports</span></div>
       </section>
 
       <section className="workspace" id="audit">
@@ -208,19 +210,19 @@ function App() {
           <form className="audit-form" onSubmit={runAudit}>
             <label><span>Website URL</span><input value={url} onChange={(event) => setUrl(event.target.value)} placeholder="https://example.com" inputMode="url" autoComplete="url" /></label>
             <label className="page-limit"><span>Page limit</span><select value={maxPages} onChange={(event) => setMaxPages(Number(event.target.value))}><option value={5}>5 pages</option><option value={10}>10 pages</option><option value={25}>25 pages</option></select></label>
-            <button className="button primary run" disabled={loading}>{loading ? <><i className="spinner"/> Crawling…</> : <>Run audit <span>→</span></>}</button>
+            <button className="button primary run" disabled={loading}>{loading ? <><i className="spinner"/> {auditJob?.status === "queued" ? "Queued…" : "Crawling…"}</> : <>Run audit <span>→</span></>}</button>
           </form>
           {message && <div className="alert">{message}</div>}
 
           {!audit && !loading && <div className="empty-state"><div className="scan-graphic"><span/><span/><span/></div><h3>Ready to inspect a website</h3><p>The crawler checks metadata, headings, canonicals, indexability, links, content depth, response status, Open Graph, schema, robots.txt, and sitemap.xml.</p></div>}
 
-          {loading && <div className="loading-state"><div className="scanner"><span/></div><h3>Crawling and evaluating pages</h3><p>Redirects and every discovered target are validated before fetch.</p></div>}
+          {loading && <div className="loading-state"><div className="scanner"><span/></div><h3>{auditJob?.status === "queued" ? "Audit queued" : "Crawling and evaluating pages"}</h3><p>{auditJob ? `${auditJob.pagesScanned}/${auditJob.maxPages} pages · attempt ${Math.max(1, auditJob.attempts)}` : "Creating an asynchronous audit job…"}</p><div className="job-progress" aria-label={`Audit progress ${auditJob?.progress || 0}%`}><span style={{ width: `${auditJob?.progress || 2}%` }}/></div><small>{auditJob?.progress || 0}% · You can keep this page open while the Worker completes the job.</small></div>}
 
           {audit && <>
             <section className="result-summary">
               <ScoreRing score={audit.score}/>
               <div className="summary-copy"><div className="eyebrow">Audit complete</div><h3>{audit.rootUrl}</h3><p>{audit.pagesScanned} pages scanned · {audit.issues.length} findings{audit.stoppedReason ? ` · ${audit.stoppedReason}` : ""}</p></div>
-              <div className="summary-actions"><button className="button subtle" onClick={() => download("rankforge-audit.csv", auditIssuesCsv(audit), "text/csv;charset=utf-8")}>Export CSV</button><button className="button subtle" onClick={() => download("rankforge-audit.json", JSON.stringify(audit, null, 2), "application/json")}>Export JSON</button><button className="button subtle" onClick={() => download("rankforge-audit.html", htmlReport(audit), "text/html")}>Export report</button></div>
+              <div className="summary-actions"><button className="button subtle" onClick={() => download("rankforge-audit.csv", auditIssuesCsv(audit), "text/csv;charset=utf-8")}>Export CSV</button><button className="button subtle" onClick={() => download("rankforge-audit.json", JSON.stringify(audit, null, 2), "application/json")}>Export JSON</button><button className="button subtle" onClick={() => download("rankforge-audit.html", htmlReport(audit), "text/html")}>Export report</button>{auditJob?.reportKey && <a className="button subtle" href={`/api/audit-jobs/${auditJob.id}/report`}>Stored R2 JSON</a>}</div>
             </section>
 
             {audit.comparison && <section className={`comparison-card ${audit.comparison.trend}`}>
@@ -256,7 +258,7 @@ function App() {
       </section>}
     </main>
 
-    <footer><span>RankForge AI v0.6</span><span>Built for transparent, standards-compliant SEO operations.</span></footer>
+    <footer><span>RankForge AI v0.7 beta</span><span>Built for transparent, standards-compliant SEO operations.</span></footer>
 
     {selectedIssue && <div className="modal-backdrop" onMouseDown={(event) => { if (event.currentTarget === event.target) setSelectedIssue(null); }}><section className="modal" role="dialog" aria-modal="true" aria-labelledby="ai-fix-title"><button className="modal-close" onClick={() => setSelectedIssue(null)} aria-label="Close">×</button><div className="eyebrow">AI remediation</div><h2 id="ai-fix-title">{selectedIssue.title}</h2>{aiLoading ? <div className="ai-loading"><i className="spinner"/> Generating an implementation-ready fix…</div> : aiFix && <div className="fix-content">{aiFix.provider && <div className="provider-pill">Generated by {aiFix.provider === "gemini" ? "Gemini" : "OpenAI"}</div>}<h4>Summary</h4><p>{aiFix.summary}</p><h4>Why it matters</h4><p>{aiFix.whyItMatters}</p><h4>Implementation</h4><p>{aiFix.implementation}</p>{aiFix.code && <><h4>Suggested code</h4><pre>{aiFix.code}</pre></>}<h4>Verify</h4><ol>{aiFix.verification.map((step, index) => <li key={index}>{step}</li>)}</ol></div>}</section></div>}
 
