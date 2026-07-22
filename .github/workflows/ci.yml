@@ -31,4 +31,19 @@ jobs:
         run: npm ci --no-audit --no-fund
 
       - name: Build, test and audit
-        run: npm run check
+        id: validation
+        shell: bash
+        run: |
+          set +e
+          npm run check > rankforge-ci.log 2>&1
+          status=$?
+          tail -n 120 rankforge-ci.log
+          exit $status
+
+      - name: Upload validation log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rankforge-ci-log
+          path: rankforge-ci.log
+          if-no-files-found: error
