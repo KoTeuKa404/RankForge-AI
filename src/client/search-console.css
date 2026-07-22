@@ -30,6 +30,9 @@
 .search-metrics { grid-template-columns: repeat(5, minmax(0, 1fr)); }
 .live-pill.muted { opacity: .65; }
 
+.app-shell footer span:first-child { font-size: 0; }
+.app-shell footer span:first-child::after { content: "RankForge AI v1.0 RC"; font-size: 13px; }
+
 @media (max-width: 1100px) {
   .search-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
