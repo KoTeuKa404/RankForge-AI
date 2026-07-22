@@ -16,7 +16,7 @@ Status: implemented.
 
 ## Stage 2 — Production hardening
 
-Status: in progress.
+Status: v0.7 beta implemented; durable execution remains in progress.
 
 Implemented:
 
@@ -29,14 +29,20 @@ Implemented:
 - sitemap.xml and robots-declared sitemap discovery
 - sitemap-index traversal and sitemap URL seeding
 - regression comparison between audits
+- D1-backed asynchronous audit job records
+- queued/running/completed/failed job states
+- browser polling and progress heartbeat
+- failed-job retry endpoint with a three-attempt limit
+- R2 JSON report artifacts and protected download endpoint
 - production-only dependency audit command
 - CI validation on main
 
 Remaining:
 
 - pre-connect DNS resolution and private-address rejection through a hardened fetch gateway
-- durable asynchronous crawl jobs, progress polling, retries, and idempotency
-- stored R2 report artifacts
+- durable Queue/Workflow execution beyond Worker `waitUntil`
+- stale-running-job recovery and idempotent queue consumers
+- true page-by-page progress emitted directly by the crawler
 - browser-level end-to-end tests
 - accessibility audit
 - richer redirect-chain reporting
@@ -123,6 +129,29 @@ Remaining:
 - cost and usage controls
 - billing and plan limits
 
-## Definition of done for v1.0
+## Planned releases
+
+### v0.7 beta — asynchronous crawler
+
+- D1 audit jobs
+- progress polling
+- retry endpoint
+- R2 report artifacts
+
+### v0.8 beta — search evidence
+
+- Google Search Console OAuth
+- query/page ingestion
+- search-volume and difficulty adapters
+- semantic clustering and internal links
+
+### v0.9 release candidate — deployment hardening
+
+- durable queue/workflow runner
+- hardened DNS fetch gateway
+- browser E2E and accessibility tests
+- usage limits and evaluation suite
+
+### v1.0
 
 A user can connect a site, crawl it safely at useful scale, combine crawl and Search Console evidence, prioritize issues, generate reviewable fixes and content briefs, track implementation, and demonstrate measurable before/after changes without relying on opaque or manipulative SEO tactics.
