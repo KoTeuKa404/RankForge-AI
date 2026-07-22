@@ -67,6 +67,26 @@ export interface AuditResult {
   comparison?: AuditComparison;
 }
 
+export type AuditJobStatus = "queued" | "running" | "completed" | "failed";
+
+export interface AuditJob {
+  id: string;
+  rootUrl: string;
+  maxPages: number;
+  status: AuditJobStatus;
+  progress: number;
+  pagesScanned: number;
+  attempts: number;
+  auditId?: string;
+  reportKey?: string;
+  error?: string;
+  createdAt: string;
+  updatedAt: string;
+  startedAt?: string;
+  finishedAt?: string;
+  audit?: AuditResult;
+}
+
 export interface Project {
   id: string;
   name: string;
