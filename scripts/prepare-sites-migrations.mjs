@@ -2,7 +2,7 @@ import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const root = resolve(fileURLToPath(new URL("..", import.meta.url)), "..");
+const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const sourceDir = join(root, "migrations");
 const outputDir = join(root, "drizzle");
 const metaDir = join(outputDir, "meta");
