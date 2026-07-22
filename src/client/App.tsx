@@ -99,6 +99,18 @@ function App() {
     .filter((issue) => filter === "all" || issue.severity === filter)
     .sort((a, b) => severityOrder[a.severity] - severityOrder[b.severity]), [audit, filter]);
 
+  async function refreshHistory(): Promise<void> {
+    if (!identity.authenticated) return;
+    const data = await api.audits(selectedProject || undefined);
+    setHistory(data.audits);
+  }
+
+  async function finishAuditJob(result: { audit: AuditResult }): Promise<void> {
+    setAudit(result.audit);
+    setUrl(result.audit.rootUrl);
+    await refreshHistory();
+  }
+
   async function runAudit(event: React.FormEvent) {
     event.preventDefault();
     setLoading(true);
@@ -108,14 +120,26 @@ function App() {
     setSelectedIssue(null);
     try {
       const result = await api.audit(url, maxPages, selectedProject || undefined, setAuditJob);
-      setAudit(result.audit);
-      setUrl(result.audit.rootUrl);
-      if (identity.authenticated) {
-        const data = await api.audits(selectedProject || undefined);
-        setHistory(data.audits);
-      }
+      await finishAuditJob(result);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Audit failed.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function retryFailedAudit() {
+    if (!auditJob || auditJob.status !== "failed") return;
+    setLoading(true);
+    setMessage("");
+    setAudit(null);
+    try {
+      const restarted = await api.retryAuditJob(auditJob.id);
+      setAuditJob(restarted.job);
+      const result = await api.waitAuditJob(restarted.job, setAuditJob);
+      await finishAuditJob(result);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Audit retry failed.");
     } finally {
       setLoading(false);
     }
@@ -137,6 +161,7 @@ function App() {
   async function openHistory(item: AuditSummary) {
     setLoading(true);
     setMessage("");
+    setAuditJob(null);
     try {
       const result = await api.auditById(item.id);
       setAudit(result.audit);
@@ -212,11 +237,11 @@ function App() {
             <label className="page-limit"><span>Page limit</span><select value={maxPages} onChange={(event) => setMaxPages(Number(event.target.value))}><option value={5}>5 pages</option><option value={10}>10 pages</option><option value={25}>25 pages</option></select></label>
             <button className="button primary run" disabled={loading}>{loading ? <><i className="spinner"/> {auditJob?.status === "queued" ? "Queued…" : "Crawling…"}</> : <>Run audit <span>→</span></>}</button>
           </form>
-          {message && <div className="alert">{message}</div>}
+          {message && <div className="alert job-error"><span>{message}</span>{auditJob?.status === "failed" && auditJob.attempts < 3 && <button type="button" className="button subtle" onClick={retryFailedAudit} disabled={loading}>Retry job</button>}</div>}
 
-          {!audit && !loading && <div className="empty-state"><div className="scan-graphic"><span/><span/><span/></div><h3>Ready to inspect a website</h3><p>The crawler checks metadata, headings, canonicals, indexability, links, content depth, response status, Open Graph, schema, robots.txt, and sitemap.xml.</p></div>}
+          {!audit && !loading && !message && <div className="empty-state"><div className="scan-graphic"><span/><span/><span/></div><h3>Ready to inspect a website</h3><p>The crawler checks metadata, headings, canonicals, indexability, links, content depth, response status, Open Graph, schema, robots.txt, and sitemap.xml.</p></div>}
 
-          {loading && <div className="loading-state"><div className="scanner"><span/></div><h3>{auditJob?.status === "queued" ? "Audit queued" : "Crawling and evaluating pages"}</h3><p>{auditJob ? `${auditJob.pagesScanned}/${auditJob.maxPages} pages · attempt ${Math.max(1, auditJob.attempts)}` : "Creating an asynchronous audit job…"}</p><div className="job-progress" aria-label={`Audit progress ${auditJob?.progress || 0}%`}><span style={{ width: `${auditJob?.progress || 2}%` }}/></div><small>{auditJob?.progress || 0}% · You can keep this page open while the Worker completes the job.</small></div>}
+          {loading && <div className="loading-state"><div className="scanner"><span/></div><h3>{auditJob?.status === "queued" ? "Audit queued" : "Crawling and evaluating pages"}</h3><p>{auditJob ? `Estimated background progress · attempt ${Math.max(1, auditJob.attempts)}` : "Creating an asynchronous audit job…"}</p><div className="job-progress" aria-label={`Estimated audit progress ${auditJob?.progress || 0}%`}><span style={{ width: `${auditJob?.progress || 2}%` }}/></div><small>{auditJob?.progress || 0}% estimated · job {auditJob?.id?.slice(0, 8) || "pending"}</small></div>}
 
           {audit && <>
             <section className="result-summary">
