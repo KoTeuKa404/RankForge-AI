@@ -94,12 +94,15 @@ export interface UserIdentity {
   name?: string;
 }
 
+export type AiProviderName = "openai" | "gemini";
+
 export interface AiFix {
   summary: string;
   whyItMatters: string;
   implementation: string;
   code?: string;
   verification: string[];
+  provider?: AiProviderName;
 }
 
 export type SearchIntent = "informational" | "commercial" | "transactional" | "navigational" | "local";
