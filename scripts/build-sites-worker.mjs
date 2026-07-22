@@ -3,7 +3,7 @@ import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
-const root = resolve(fileURLToPath(new URL("..", import.meta.url)), "..");
+const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const tempDir = join(root, ".sites-worker-build");
 const outputDir = join(root, "dist", "server");
 const npx = process.platform === "win32" ? "npx.cmd" : "npx";
