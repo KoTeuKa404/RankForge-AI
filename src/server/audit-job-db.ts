@@ -149,6 +149,25 @@ export async function updateAuditJobProgress(
   ).bind(Math.max(0, pagesScanned), progress, new Date().toISOString(), id, ownerKey).run();
 }
 
+export async function heartbeatAuditJob(
+  db: D1Database,
+  ownerKey: string,
+  id: string,
+  progress: number,
+): Promise<void> {
+  await db.prepare(
+    `UPDATE audit_jobs
+     SET progress = CASE WHEN progress < ? THEN ? ELSE progress END, updated_at = ?
+     WHERE id = ? AND owner_key = ? AND status = 'running'`,
+  ).bind(
+    Math.max(5, Math.min(90, progress)),
+    Math.max(5, Math.min(90, progress)),
+    new Date().toISOString(),
+    id,
+    ownerKey,
+  ).run();
+}
+
 export async function completeAuditJob(
   db: D1Database,
   ownerKey: string,
