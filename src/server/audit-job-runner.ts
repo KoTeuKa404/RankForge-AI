@@ -6,11 +6,16 @@ import {
   claimAuditJob,
   completeAuditJob,
   failAuditJob,
+  heartbeatAuditJob,
   updateAuditJobProgress,
 } from "./audit-job-db";
 
 function reportKeyFor(jobId: string): string {
   return `audit-reports/${jobId}.json`;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 export async function runAuditJob(env: Env, ownerKey: string, jobId: string): Promise<void> {
@@ -24,7 +29,21 @@ export async function runAuditJob(env: Env, ownerKey: string, jobId: string): Pr
       ? await getLatestComparableAudit(env.DB, job.ownerEmail, job.projectId, job.rootUrl)
       : null;
 
-    const result = await auditSite(job.rootUrl, { maxPages: job.maxPages });
+    let settled = false;
+    let heartbeat = 5;
+    const auditPromise = auditSite(job.rootUrl, { maxPages: job.maxPages }).finally(() => {
+      settled = true;
+    });
+
+    while (!settled) {
+      await Promise.race([auditPromise.then(() => undefined, () => undefined), sleep(800)]);
+      if (!settled) {
+        heartbeat = Math.min(90, heartbeat + 5);
+        await heartbeatAuditJob(env.DB, ownerKey, job.id, heartbeat);
+      }
+    }
+
+    const result = await auditPromise;
     await updateAuditJobProgress(env.DB, ownerKey, job.id, result.pagesScanned, job.maxPages);
 
     if (previous) result.comparison = compareAudits(result, previous);
