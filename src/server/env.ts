@@ -1,15 +1,29 @@
+export interface AuditQueueMessage {
+  ownerKey: string;
+  jobId: string;
+}
+
 export interface Env {
   DB?: D1Database;
   FILES?: R2Bucket;
   ASSETS?: Fetcher;
+  AUDIT_QUEUE?: Queue<AuditQueueMessage>;
   AI_PROVIDER?: string;
   OPENAI_API_KEY?: string;
   OPENAI_MODEL?: string;
   GEMINI_API_KEY?: string;
   GEMINI_MODEL?: string;
+  GSC_CLIENT_ID?: string;
+  GSC_CLIENT_SECRET?: string;
+  GSC_TOKEN_SECRET?: string;
+  GSC_REDIRECT_URI?: string;
   MONITOR_TOKEN?: string;
   DEV_USER_EMAIL?: string;
   ENVIRONMENT?: string;
+  MONTHLY_AUDIT_LIMIT?: string;
+  MONTHLY_AI_FIX_LIMIT?: string;
+  MONTHLY_GSC_SYNC_LIMIT?: string;
+  MONTHLY_PAGE_LIMIT?: string;
 }
 
 export interface Identity {
