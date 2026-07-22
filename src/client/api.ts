@@ -45,9 +45,10 @@ export const api = {
     body: JSON.stringify({ url, maxPages, projectId: projectId || undefined }),
   }),
   auditById: (id: string) => request<{ audit: AuditResult }>(`/api/audits/${encodeURIComponent(id)}`),
-  aiFix: (issue: SeoIssue, page?: PageAudit) => request<{ fix: AiFix }>("/api/ai-fix", {
+  aiFix: (issue: SeoIssue, pages: PageAudit[] = []) => request<{ fix: AiFix }>("/api/ai-fix", {
     method: "POST",
-    body: JSON.stringify({ issue, page }),
+    // `page` remains backward-compatible with the existing endpoint; the server accepts one page or an array.
+    body: JSON.stringify({ issue, page: pages.slice(0, 12) }),
   }),
   keywordAnalyses: (projectId?: string) => request<{ analyses: KeywordAnalysisSummary[] }>(`/api/keyword-analyses${projectId ? `?projectId=${encodeURIComponent(projectId)}` : ""}`),
   analyzeKeywords: (input: string, projectId?: string, name?: string) => request<{ analysis: KeywordAnalysis }>("/api/keyword-analyses", {
