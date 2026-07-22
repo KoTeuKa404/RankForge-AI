@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { analyzeHtml, calculateScore, evaluatePage, groupIssues } from "../src/server/audit";
+import { analyzeHtml, calculateScore, evaluatePage, groupIssues, isAllowedByRobots, parseRobots, parseSitemapDocument } from "../src/server/audit";
 import { canonicalizeCrawlUrl, normalizeTargetUrl, TargetValidationError } from "../src/server/security";
 
 describe("target validation", () => {
@@ -21,6 +21,43 @@ describe("target validation", () => {
     const base = new URL("https://example.com/");
     const query = Array.from({ length: 13 }, (_, index) => `p${index}=x`).join("&");
     expect(canonicalizeCrawlUrl(`/products?${query}`, base)).toBeNull();
+  });
+});
+
+describe("robots and sitemap discovery", () => {
+  it("prefers the specific bot group and applies longest-match Allow rules", () => {
+    const rules = parseRobots(`
+User-agent: *
+Disallow: /
+
+User-agent: RankForgeBot
+Disallow: /private
+Allow: /private/public
+Crawl-delay: 10
+Sitemap: https://example.com/sitemap-index.xml
+`);
+    expect(isAllowedByRobots(new URL("https://example.com/private/page"), rules)).toBe(false);
+    expect(isAllowedByRobots(new URL("https://example.com/private/public/page"), rules)).toBe(true);
+    expect(isAllowedByRobots(new URL("https://example.com/products"), rules)).toBe(true);
+    expect(rules.crawlDelayMs).toBe(2_000);
+    expect(rules.sitemaps).toEqual(["https://example.com/sitemap-index.xml"]);
+  });
+
+  it("honors end-anchored robots patterns", () => {
+    const rules = parseRobots("User-agent: *\nDisallow: /*.pdf$\nAllow: /public/");
+    expect(isAllowedByRobots(new URL("https://example.com/file.pdf"), rules)).toBe(false);
+    expect(isAllowedByRobots(new URL("https://example.com/file.pdf?download=1"), rules)).toBe(true);
+  });
+
+  it("parses sitemap indexes, CDATA, and XML entities", () => {
+    expect(parseSitemapDocument(`<?xml version="1.0"?><sitemapindex><sitemap><loc><![CDATA[https://example.com/products&amp;pages.xml]]></loc></sitemap></sitemapindex>`)).toEqual({
+      kind: "sitemapindex",
+      locations: ["https://example.com/products&pages.xml"],
+    });
+    expect(parseSitemapDocument(`<urlset><url><loc>https://example.com/a</loc></url><url><loc>https://example.com/b</loc></url></urlset>`)).toEqual({
+      kind: "urlset",
+      locations: ["https://example.com/a", "https://example.com/b"],
+    });
   });
 });
 
@@ -52,6 +89,13 @@ describe("HTML analysis", () => {
     expect(codes).toContain("h1-missing");
     expect(codes).toContain("canonical-missing");
     expect(codes).toContain("image-alt-missing");
+  });
+
+  it("flags cross-origin and fragment canonicals", () => {
+    const crossOrigin = analyzeHtml(`<html><head><link rel="canonical" href="https://other.example/page"></head><body><h1>Page</h1></body></html>`, "https://example.com/page");
+    const fragment = analyzeHtml(`<html><head><link rel="canonical" href="/page#main"></head><body><h1>Page</h1></body></html>`, "https://example.com/page");
+    expect(evaluatePage(crossOrigin).map((item) => item.code)).toContain("canonical-cross-origin");
+    expect(evaluatePage(fragment).map((item) => item.code)).toContain("canonical-fragment");
   });
 
   it("groups repeated template issues into one backlog item", () => {
