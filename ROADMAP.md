@@ -1,161 +1,108 @@
 # RankForge AI roadmap
 
-## Stage 1 — Technical Audit MVP
+## Current release
 
-Status: implemented.
+Status: `1.0.0-rc.1` implemented in `main`; local and hosted acceptance validation is required before promoting to stable `1.0.0`.
 
-- public product page
-- optional Sign in with ChatGPT
-- projects and audit history
-- bounded same-origin crawl
-- technical/on-page issue engine
-- grouped findings and normalized SEO score
-- CSV, JSON, and HTML exports
-- Gemini and OpenAI AI Fix providers
-- D1 schema, rate limits, tests, and security baseline
+## 1.0 product scope
 
-## Stage 2 — Production hardening
+### Technical audit and crawler — implemented
 
-Status: v0.7 beta implemented; durable execution remains in progress.
+- public product interface and optional Sign in with ChatGPT
+- projects, durable audit history, and before/after comparisons
+- bounded same-origin crawling
+- technical and on-page issue engine
+- grouped template findings and normalized score
+- robots.txt groups, Allow/Disallow precedence, bounded crawl delay
+- sitemap and sitemap-index traversal with URL seeding
+- tracking-parameter cleanup, query-variant limits, redirects, and final-URL deduplication
+- CSV, JSON, standalone HTML, and R2 JSON exports
 
-Implemented:
+### Production execution and security — implemented
 
-- redirect destination validation
-- tracking-parameter cleanup and query-variant limits
-- duplicate final-URL protection
-- robots user-agent group selection
-- Allow/Disallow longest-match precedence
-- bounded Crawl-delay support
-- sitemap.xml and robots-declared sitemap discovery
-- sitemap-index traversal and sitemap URL seeding
-- regression comparison between audits
-- D1-backed asynchronous audit job records
-- queued/running/completed/failed job states
-- browser polling and phase-aware progress
-- persisted crawl phase, current URL, processed-page count, and queue size fields
-- stale-running-job detection after five minutes
-- failed-job retry endpoint and UI with a three-attempt limit
-- internal ownership fields hidden from audit-job API responses
-- R2 JSON report artifacts and protected download endpoint
-- production-only dependency audit command
-- CI validation on main
+- D1 audit jobs with queued/running/completed/failed states
+- Cloudflare Queue producer and consumer
+- retry policy and dead-letter queue configuration
+- scheduled stale-job recovery
+- Worker execution-context fallback when Queue is unavailable
+- phase-aware progress and failed-job retry UI
+- literal private/local/reserved target blocking
+- A/AAAA DNS-over-HTTPS preflight before every fetch and redirect
+- response timeout, response-size limits, standard-port restrictions, and credential rejection
+- monthly audit, AI, Search Console, and crawl-page usage controls
+- production dependency audit, CI, release contract, accessibility contracts, and runtime smoke test
 
-Remaining:
+### Keyword and content operations — implemented
 
-- pre-connect DNS resolution and private-address rejection through a hardened fetch gateway
-- durable Queue/Workflow execution beyond Worker `waitUntil`
-- idempotent queue consumers and automatic recovery for abandoned queued jobs
-- true page-by-page progress callbacks emitted directly by the crawler
-- browser-level end-to-end tests
-- accessibility audit
-- richer redirect-chain reporting
-- crawl budget and per-project usage controls
-
-## Stage 3 — Keyword intelligence
-
-Status: beta implemented.
-
-Implemented:
-
-- keyword import from pasted text/CSV-like input
-- deterministic clustering
-- intent classification
+- keyword import from pasted text and CSV-like input
+- deterministic clustering and multilingual intent classification
 - primary/secondary keyword selection
 - overlap and cannibalization warnings
-- content map suggestions by page type
+- content maps and page-type suggestions
+- editable content briefs
+- draft/review/approved editorial states
+- title, description, H1, outline, questions, schema, and quality checklist suggestions
 
-Remaining:
+### Internal linking — implemented
 
-- embeddings-based clustering provider
-- search-volume and difficulty provider adapters
-- Google Search Console query ingestion
-- clustering evaluation dataset
-
-## Stage 4 — Content operations
-
-Status: beta implemented.
-
-Implemented:
-
-- content brief generator
-- editable briefs
-- editorial draft/review/approved states
-- title, meta description, H1, outline, questions, schema, and checklist suggestions
-
-Remaining:
-
-- live SERP/provider adapters
-- source citation workflow
-- content quality scoring
-- WordPress draft publishing adapter
-- standalone schema markup generator and validator
-
-## Stage 5 — Internal linking and Search Console
-
-Status: partially implemented.
-
-Implemented:
-
-- internal-link suggestions
+- crawl-grounded contextual suggestions
 - orphan and underlinked-page detection
 - anchor suggestions and confidence values
-- saved internal-link analyses
+- saved link plans
+- Gemini Embedding 2 semantic relevance enhancement
+- deterministic fallback when embeddings are unavailable
 
-Remaining:
+### Google Search Console — implemented
 
-- semantic embeddings for link relevance
-- depth and graph visualization
-- anchor diversity checks
-- Google Search Console OAuth integration
-- query/page performance ingestion
-- change annotations and opportunity scoring
+- OAuth authorization and state validation
+- encrypted access and refresh token storage
+- automatic token refresh
+- property discovery and selection
+- 7, 28, and 90 day query/page ingestion
+- clicks, impressions, CTR, and position summaries
+- striking-distance, low-CTR, and high-impression opportunity scoring
+- saved Search Console snapshots
 
-## Stage 6 — Full SearchOps platform
+### Monitoring and AI remediation — implemented
 
-Status: partially implemented.
+- monitor configurations and manual runs
+- scheduled due-monitor processing
+- comparisons and alerts
+- Gemini and OpenAI AI Fix providers
+- automatic provider fallback
+- grouped-page context for template-level fixes
+- server-side AI recommendation quality evaluation
+- rejection of manipulative recommendations and unsupported ranking guarantees
 
-Implemented:
+## Stable 1.0 acceptance gate
 
-- monitoring configurations
-- scheduled-run endpoint
-- audit comparisons
-- monitoring alerts
+The following are release verification tasks rather than missing product features:
 
-Remaining:
+1. regenerate and commit `package-lock.json` for `1.0.0-rc.1`;
+2. run all eight D1 migrations locally;
+3. pass `npm run check` on Node.js 22;
+4. pass local runtime `npm run smoke`;
+5. create and bind production D1, R2, Queue, and dead-letter Queue resources;
+6. apply remote migrations and pass the hosted smoke test;
+7. verify Google OAuth using the exact hosted callback URL;
+8. verify one 25-page Queue crawl, retry/recovery, R2 report, semantic links, AI Fix, and scheduled monitoring;
+9. complete responsive, keyboard, and manual accessibility review;
+10. change the version to `1.0.0`, synchronize the lockfile, tag `v1.0.0`, and publish.
 
-- production scheduler deployment validation
-- team roles and project permissions
-- external alerts and webhooks
-- white-label reports
-- multi-site portfolio dashboard
-- evaluation suite for AI recommendations
-- cost and usage controls
-- billing and plan limits
+The full procedure is in `PRODUCTION_DEPLOYMENT.md`.
 
-## Planned releases
+## Post-1.0 roadmap
 
-### v0.7 beta — asynchronous crawler
+These items are intentionally outside the initial stable release:
 
-- D1 audit jobs
-- progress polling
-- retry endpoint and UI
-- stale job detection
-- R2 report artifacts
-
-### v0.8 beta — search evidence
-
-- Google Search Console OAuth
-- query/page ingestion
-- search-volume and difficulty adapters
-- semantic clustering and internal links
-
-### v0.9 release candidate — deployment hardening
-
-- durable queue/workflow runner
-- hardened DNS fetch gateway
-- browser E2E and accessibility tests
-- usage limits and evaluation suite
-
-### v1.0
-
-A user can connect a site, crawl it safely at useful scale, combine crawl and Search Console evidence, prioritize issues, generate reviewable fixes and content briefs, track implementation, and demonstrate measurable before/after changes without relying on opaque or manipulative SEO tactics.
+- crawl limits above 25 pages and distributed crawl partitions
+- live third-party keyword-volume and paid-difficulty provider adapters
+- SERP snapshot provider and source citation workflow
+- WordPress and other CMS draft publishing adapters
+- graph visualization and anchor-diversity reporting
+- multi-user roles, organizations, and granular project permissions
+- external Slack/email/webhook alerts
+- white-label reports and multi-site portfolio dashboard
+- billing plans and payment processing
+- historical embedding storage and large-scale vector indexing
+- full Playwright cross-browser suite in hosted CI
