@@ -27,3 +27,21 @@
 .summary-actions a.button {
   text-decoration: none;
 }
+
+.alert.job-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.alert.job-error .button {
+  flex: 0 0 auto;
+}
+
+@media (max-width: 680px) {
+  .alert.job-error {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}
