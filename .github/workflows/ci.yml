@@ -31,4 +31,10 @@ jobs:
         run: npm ci --no-audit --no-fund
 
       - name: Build, test and audit
-        run: npm run check
+        shell: bash
+        run: |
+          set +e
+          npm run check > rankforge-ci.log 2>&1
+          status=$?
+          tail -n 120 rankforge-ci.log
+          exit $status
