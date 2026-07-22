@@ -1,5 +1,3 @@
-import { TargetValidationError } from "./security";
-
 interface DnsAnswer {
   type?: number;
   data?: string;
@@ -8,6 +6,13 @@ interface DnsAnswer {
 interface DnsJsonResponse {
   Status?: number;
   Answer?: DnsAnswer[];
+}
+
+export class DnsValidationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "DnsValidationError";
+  }
 }
 
 function parseIpv4(value: string): number[] | null {
@@ -62,18 +67,18 @@ async function query(hostname: string, type: "A" | "AAAA"): Promise<string[]> {
       headers: { accept: "application/dns-json" },
       signal: controller.signal,
     });
-    if (!response.ok) throw new TargetValidationError("DNS validation failed for the target host.");
+    if (!response.ok) throw new DnsValidationError("DNS validation failed for the target host.");
     const payload = await response.json() as DnsJsonResponse;
     if (payload.Status !== 0 && payload.Status !== 3) {
-      throw new TargetValidationError("DNS validation failed for the target host.");
+      throw new DnsValidationError("DNS validation failed for the target host.");
     }
     const wanted = type === "A" ? 1 : 28;
     return (payload.Answer || [])
       .filter((answer) => answer.type === wanted && typeof answer.data === "string")
       .map((answer) => answer.data!.trim());
   } catch (error) {
-    if (error instanceof TargetValidationError) throw error;
-    throw new TargetValidationError("DNS validation timed out for the target host.");
+    if (error instanceof DnsValidationError) throw error;
+    throw new DnsValidationError("DNS validation timed out for the target host.");
   } finally {
     clearTimeout(timer);
   }
@@ -82,15 +87,15 @@ async function query(hostname: string, type: "A" | "AAAA"): Promise<string[]> {
 export async function assertPublicDnsTarget(hostname: string): Promise<void> {
   if (parseIpv4(hostname) || hostname.includes(":")) {
     if (isBlockedResolvedAddress(hostname)) {
-      throw new TargetValidationError("The target resolves to a private or reserved IP address.");
+      throw new DnsValidationError("The target resolves to a private or reserved IP address.");
     }
     return;
   }
 
   const [ipv4, ipv6] = await Promise.all([query(hostname, "A"), query(hostname, "AAAA")]);
   const addresses = [...ipv4, ...ipv6];
-  if (addresses.length === 0) throw new TargetValidationError("The target hostname did not resolve to a public address.");
+  if (addresses.length === 0) throw new DnsValidationError("The target hostname did not resolve to a public address.");
   if (addresses.some(isBlockedResolvedAddress)) {
-    throw new TargetValidationError("The target resolves to a private or reserved IP address.");
+    throw new DnsValidationError("The target resolves to a private or reserved IP address.");
   }
 }
